@@ -1,0 +1,66 @@
+# 通勤场景规则
+id: RULE_COMMUTE
+priority: HIGH
+mode: ONE_TAP  # SUGGEST_ONLY | ONE_TAP | AUTO
+enabled: true
+
+conditions:
+  # 早高峰时间段
+  - type: time
+    value: MORNING_RUSH  # 7:00-9:30 工作日
+    weight: 0.6
+  
+  # 晚高峰时间段
+  - type: time
+    value: EVENING_RUSH  # 17:00-19:30 工作日
+    weight: 0.6
+  
+  # 地铁站位置
+  - type: location
+    value: SUBWAY_STATION
+    weight: 0.8
+  
+  # 步行状态
+  - type: motion
+    value: WALKING
+    weight: 0.4
+  
+  # 交通工具状态
+  - type: motion
+    value: VEHICLE
+    weight: 0.5
+  
+  # 乘车码应用使用历史
+  - type: app_usage
+    intent: TRANSIT_APP_TOP1
+    weight: 0.5
+
+actions:
+  # 开启勿扰模式
+  - target: system
+    action: setDoNotDisturb
+    params:
+      enable: true
+      allowCalls: true
+      whitelist: ['emergency_contacts']
+  
+  # 打开乘车码应用
+  - target: app
+    intent: TRANSIT_APP_TOP1
+    action: open_ticket_qr
+    deepLink: 'alipays://platformapi/startapp?appId=200011235'
+  
+  # 打开音乐应用
+  - target: app
+    intent: MUSIC_PLAYER_TOP1
+    action: launch_with_playlist
+    params:
+      playlist: 'commute'
+  
+  # 发送通知
+  - target: notification
+    action: suggest
+    params:
+      title: '通勤模式已准备'
+      body: '一键打开乘车码和音乐'
+      mode: 'ONE_TAP'
