@@ -8,6 +8,8 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -17,6 +19,13 @@ export interface SceneSuggestionNotification {
   body: string;
   actions: Action[];
   confidence: number;
+}
+
+export interface AutoModeUpgradePrompt {
+  sceneType: SceneType;
+  title: string;
+  body: string;
+  acceptCount: number;
 }
 
 export interface NotificationAction {
@@ -75,6 +84,17 @@ class NotificationManagerClass {
    * Set up Android notification channels
    */
   private async setupNotificationChannels(): Promise<void> {
+    // Auto mode upgrade channel (high priority)
+    await Notifications.setNotificationChannelAsync('auto_mode_upgrade', {
+      name: '自动模式升级',
+      description: '场景自动模式升级建议',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      enableVibrate: true,
+      showBadge: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
+
     // Scene suggestions channel (high priority)
     await Notifications.setNotificationChannelAsync('scene_suggestions', {
       name: '场景建议',
@@ -138,6 +158,12 @@ class NotificationManagerClass {
     } else if (actionIdentifier === 'dismiss') {
       // User dismissed the notification
       this.handleDismissAction(data);
+    } else if (actionIdentifier === 'accept_auto_mode') {
+      // User accepted auto mode upgrade
+      this.handleAutoModeUpgradeResponse(data, true);
+    } else if (actionIdentifier === 'reject_auto_mode') {
+      // User rejected auto mode upgrade
+      this.handleAutoModeUpgradeResponse(data, false);
     } else if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
       // User tapped the notification itself
       this.handleDefaultAction(data);
@@ -170,8 +196,53 @@ class NotificationManagerClass {
   }
 
   /**
-   * Show scene suggestion notification with one-tap execution button
+   * Handle auto mode upgrade response
    */
+  private async handleAutoModeUpgradeResponse(data: any, accepted: boolean): Promise<void> {
+    console.log(`User ${accepted ? 'accepted' : 'rejected'} auto mode upgrade for:`, data.sceneType);
+    
+    try {
+      // 动态导入 PredictiveTrigger 以避免循环依赖
+      const { predictiveTrigger } = await import('../core/PredictiveTrigger');
+      
+      // 处理用户响应
+      await predictiveTrigger.handleAutoModeUpgradeResponse(data.sceneType, accepted);
+    } catch (error) {
+      console.error('Failed to handle auto mode upgrade response:', error);
+    }
+  }
+
+  /**
+   * Show auto mode upgrade prompt notification
+   */
+  async showAutoModeUpgradePrompt(prompt: AutoModeUpgradePrompt): Promise<string | null> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: prompt.title,
+          body: prompt.body,
+          data: {
+            type: 'auto_mode_upgrade',
+            sceneType: prompt.sceneType,
+            acceptCount: prompt.acceptCount,
+            timestamp: Date.now(),
+          },
+          categoryIdentifier: 'auto_mode_upgrade',
+          sound: true,
+        },
+        trigger: null, // Show immediately
+      });
+
+      return notificationId;
+    } catch (error) {
+      console.error('Failed to show auto mode upgrade prompt:', error);
+      return null;
+    }
+  }
   async showSceneSuggestion(suggestion: SceneSuggestionNotification): Promise<string | null> {
     if (!this.initialized) {
       await this.initialize();
@@ -313,6 +384,24 @@ class NotificationManagerClass {
         },
       },
     ]);
+
+    // Auto mode upgrade category
+    await Notifications.setNotificationCategoryAsync('auto_mode_upgrade', [
+      {
+        identifier: 'accept_auto_mode',
+        buttonTitle: '升级为自动模式',
+        options: {
+          opensAppToForeground: true,
+        },
+      },
+      {
+        identifier: 'reject_auto_mode',
+        buttonTitle: '暂不升级',
+        options: {
+          opensAppToForeground: false,
+        },
+      },
+    ]);
   }
 
   /**
@@ -320,12 +409,12 @@ class NotificationManagerClass {
    */
   cleanup(): void {
     if (this.notificationListener) {
-      Notifications.removeNotificationSubscription(this.notificationListener);
+      this.notificationListener.remove();
       this.notificationListener = null;
     }
 
     if (this.responseListener) {
-      Notifications.removeNotificationSubscription(this.responseListener);
+      this.responseListener.remove();
       this.responseListener = null;
     }
 

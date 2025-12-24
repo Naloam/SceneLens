@@ -236,7 +236,7 @@ export class AppDiscoveryEngine {
       // 综合考虑使用时长和启动次数
       // 使用时长权重 0.6，启动次数权重 0.4
       const timeScore = stats.totalTimeInForeground / (1000 * 60 * 60); // 转换为小时
-      const launchScore = stats.launchCount;
+      const launchScore = stats.launchCount ?? 0;
       const score = timeScore * 0.6 + launchScore * 0.4;
 
       return { app, score };

@@ -270,6 +270,8 @@ export interface TriggerHistory {
   acceptCount: number;
   ignoreCount: number;
   cancelCount: number;
+  consecutiveIgnores: number;  // 连续忽略次数
+  lastFeedback: UserFeedback | null;  // 最后一次反馈
 }
 
 /**
@@ -353,6 +355,32 @@ export class SceneLensError extends Error {
     super(message);
     this.name = 'SceneLensError';
   }
+}
+
+// ==================== 相机相关 ====================
+
+/**
+ * 图像数据
+ */
+export interface ImageData {
+  base64: string;      // Base64 编码的图像数据
+  width: number;       // 图像宽度
+  height: number;      // 图像高度
+  format: string;      // 图像格式 (JPEG, PNG)
+  timestamp: number;   // 拍摄时间戳
+}
+
+// ==================== 音频相关 ====================
+
+/**
+ * 音频数据
+ */
+export interface AudioData {
+  base64: string;      // Base64 编码的音频数据
+  duration: number;    // 音频时长（毫秒）
+  sampleRate: number;  // 采样率
+  format: string;      // 音频格式 (WAV, AAC)
+  timestamp: number;   // 录制时间戳
 }
 
 // ==================== 预测相关 ====================

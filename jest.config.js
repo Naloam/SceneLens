@@ -14,6 +14,9 @@ module.exports = {
   ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    'react-native-fast-tflite': '<rootDir>/src/__mocks__/react-native-fast-tflite.ts',
+    '\\.tflite$': '<rootDir>/src/__mocks__/tflite-mock.js',
+    'react-native': '<rootDir>/src/__mocks__/react-native.js',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {

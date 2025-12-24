@@ -12,6 +12,7 @@ import type {
   SilentContext,
   SceneType,
   SignalType,
+  Location,
 } from '../types';
 import sceneBridge from '../core/SceneBridge';
 
@@ -54,6 +55,30 @@ export class SilentContextEngine {
    * 信号缓存
    */
   private signalCache: Map<SignalType, ContextSignal> = new Map();
+
+  /**
+   * 简单的地理围栏配置（米级半径）
+   */
+  private geoFences: Map<string, { latitude: number; longitude: number; radius: number }> = new Map();
+
+  /**
+   * 已知 Wi-Fi SSID 映射到地点类型
+   */
+  private knownWiFiMap: Map<string, string> = new Map();
+
+  /**
+   * 外部可配置围栏，key 为逻辑地点，如 HOME/OFFICE/SUBWAY_STATION
+   */
+  setGeoFences(fences: Record<string, { latitude: number; longitude: number; radius: number }>) {
+    this.geoFences = new Map(Object.entries(fences));
+  }
+
+  /**
+   * 外部可配置已知 Wi-Fi 对应地点
+   */
+  setKnownWiFi(map: Record<string, string>) {
+    this.knownWiFiMap = new Map(Object.entries(map));
+  }
 
   /**
    * 获取当前场景上下文
@@ -209,23 +234,65 @@ export class SilentContextEngine {
   private async getLocationSignal(): Promise<ContextSignal | null> {
     try {
       const location = await sceneBridge.getCurrentLocation();
-      
-      // 简单的位置分类逻辑
-      // 在实际应用中，应该与用户配置的地理围栏进行匹配
-      // 这里提供基础的占位符实现
-      
-      // TODO: 实现与 GeoFence 的匹配逻辑
-      // 目前返回一个通用的位置信号
+      if (!location) {
+        return null;
+      }
+
+      const locationType = this.classifyLocation(location);
+      const weight = locationType === 'UNKNOWN' ? 0.5 : 0.85;
+
       return {
         type: 'LOCATION',
-        value: 'UNKNOWN_LOCATION',
-        weight: 0.5,
+        value: locationType,
+        weight,
         timestamp: Date.now(),
       };
     } catch (error) {
       // 权限未授予或其他错误
       return null;
     }
+  }
+
+  /**
+   * 根据围栏匹配位置
+   */
+  private classifyLocation(location: Location): string {
+    let nearest: { type: string; distance: number } | null = null;
+
+    for (const [type, fence] of this.geoFences.entries()) {
+      const distance = this.calculateDistance(
+        location.latitude,
+        location.longitude,
+        fence.latitude,
+        fence.longitude,
+      );
+      if (distance <= fence.radius) {
+        if (!nearest || distance < nearest.distance) {
+          nearest = { type, distance };
+        }
+      }
+    }
+
+    return nearest?.type ?? 'UNKNOWN';
+  }
+
+  /**
+   * Haversine 计算两点距离（米）
+   */
+  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000;
+    const dLat = this.toRad(lat2 - lat1);
+    const dLon = this.toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  private toRad(deg: number): number {
+    return deg * Math.PI / 180;
   }
 
   /**
@@ -242,29 +309,22 @@ export class SilentContextEngine {
         return null;
       }
 
-      // 简单的 Wi-Fi 分类逻辑
-      // 在实际应用中，应该与用户配置的家庭/办公室 Wi-Fi 进行匹配
-      // 这里提供基础的启发式规则
-      
-      let locationHint = 'UNKNOWN_WIFI';
-      let weight = 0.7;
+      // 优先使用用户配置的已知 Wi-Fi 映射
+      const configured = this.knownWiFiMap.get(wifi.ssid) || this.knownWiFiMap.get(wifi.ssid.toLowerCase());
 
-      const ssidLower = wifi.ssid.toLowerCase();
-      
-      // 检测常见的家庭 Wi-Fi 命名模式
-      if (ssidLower.includes('home') || 
-          ssidLower.includes('家') || 
-          ssidLower.includes('house')) {
-        locationHint = 'HOME';
-        weight = 0.9;
-      } 
-      // 检测常见的办公室 Wi-Fi 命名模式
-      else if (ssidLower.includes('office') || 
-               ssidLower.includes('work') || 
-               ssidLower.includes('公司') ||
-               ssidLower.includes('corp')) {
-        locationHint = 'OFFICE';
-        weight = 0.9;
+      let locationHint = configured ?? 'UNKNOWN_WIFI';
+      let weight = configured ? 0.9 : 0.7;
+
+      // 启发式兜底
+      if (!configured) {
+        const ssidLower = wifi.ssid.toLowerCase();
+        if (ssidLower.includes('home') || ssidLower.includes('家') || ssidLower.includes('house')) {
+          locationHint = 'HOME';
+          weight = 0.9;
+        } else if (ssidLower.includes('office') || ssidLower.includes('work') || ssidLower.includes('公司') || ssidLower.includes('corp')) {
+          locationHint = 'OFFICE';
+          weight = 0.9;
+        }
       }
 
       return {
@@ -367,6 +427,17 @@ export class SilentContextEngine {
    * @returns 场景上下文
    */
   private inferScene(signals: ContextSignal[]): SilentContext {
+    // 如果只有时间信号，避免单一时间段直接判定为通勤，返回未知低置信度
+    if (signals.length <= 1) {
+      const sole = signals[0];
+      return {
+        timestamp: Date.now(),
+        context: 'UNKNOWN',
+        confidence: sole ? Math.min(sole.weight * 0.3, 0.3) : 0,
+        signals,
+      };
+    }
+
     const sceneScores: SceneScores = new Map();
 
     // 遍历所有信号，累加场景得分

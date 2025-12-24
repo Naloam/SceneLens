@@ -1,5 +1,7 @@
 import { Action } from '../rules';
 import SceneBridge from '../core/SceneBridge';
+import { appDiscoveryEngine } from '../discovery';
+import { notificationManager } from '../notifications/NotificationManager';
 
 /**
  * 执行结果
@@ -133,28 +135,23 @@ export class SceneExecutor {
    * 执行通知动作
    */
   private async executeNotification(action: Action): Promise<void> {
-    // 这里暂时只是记录日志
-    // 实际实现需要使用 expo-notifications
-    console.log('Notification action:', {
+    if (action.action === 'suggest') {
+      await notificationManager.showSceneSuggestion({
+        sceneType: action.params?.sceneType ?? 'COMMUTE',
+        title: action.params?.title ?? '场景建议',
+        body: action.params?.body ?? '',
+        actions: [],
+        confidence: action.params?.confidence ?? 0.7,
+      });
+      return;
+    }
+
+    // 兜底日志
+    console.log('Notification action (fallback):', {
       title: action.params?.title,
       body: action.params?.body,
       mode: action.params?.mode,
     });
-
-    // TODO: 在 Week 1 Task 5 中实现真正的通知功能
-    // const notification = {
-    //   title: action.params?.title,
-    //   body: action.params?.body,
-    //   data: {
-    //     mode: action.params?.mode,
-    //     actions: action.params?.actions,
-    //   },
-    // };
-    //
-    // await Notifications.scheduleNotificationAsync({
-    //   content: notification,
-    //   trigger: null, // 立即显示
-    // });
   }
 
   /**
@@ -162,13 +159,20 @@ export class SceneExecutor {
    * 将意图（如 TRANSIT_APP_TOP1）解析为实际包名
    */
   private async resolveIntent(intent: string): Promise<string | null> {
-    // TODO: 集成 AppDiscoveryEngine
-    // 目前返回硬编码的包名作为示例
-    const intentMap: Record<string, string> = {
-      TRANSIT_APP_TOP1: 'com.eg.android.AlipayGphone', // 支付宝
-      MUSIC_PLAYER_TOP1: 'com.netease.cloudmusic', // 网易云音乐
-    };
+    try {
+      if (!appDiscoveryEngine.isInitialized()) {
+        await appDiscoveryEngine.initialize();
+      }
+      const resolved = appDiscoveryEngine.resolveIntent(intent);
+      if (resolved) return resolved;
+    } catch (error) {
+      console.warn('AppDiscoveryEngine resolve failed, fallback to defaults', error);
+    }
 
-    return intentMap[intent] || null;
+    const fallbackMap: Record<string, string> = {
+      TRANSIT_APP_TOP1: 'com.eg.android.AlipayGphone',
+      MUSIC_PLAYER_TOP1: 'com.netease.cloudmusic',
+    };
+    return fallbackMap[intent] || null;
   }
 }

@@ -1,0 +1,54 @@
+{
+  "models": {
+    "mobilenet_v3_small": {
+      "filename": "mobilenet_v3_small_quant.tflite",
+      "type": "image_classification",
+      "input_shape": [1, 224, 224, 3],
+      "input_type": "uint8",
+      "output_shape": [1, 10],
+      "output_type": "uint8",
+      "preprocessing": {
+        "resize": [224, 224],
+        "normalize": {
+          "mean": [127.5, 127.5, 127.5],
+          "std": [127.5, 127.5, 127.5]
+        }
+      },
+      "labels": [
+        "indoor_office",
+        "indoor_home",
+        "outdoor_street",
+        "outdoor_park",
+        "transport_subway",
+        "transport_bus",
+        "transport_car",
+        "restaurant",
+        "gym",
+        "library"
+      ]
+    },
+    "yamnet_lite": {
+      "filename": "yamnet_lite_quant.tflite",
+      "type": "audio_classification",
+      "input_shape": [1, 16000],
+      "input_type": "float32",
+      "output_shape": [1, 9],
+      "output_type": "float32",
+      "preprocessing": {
+        "sample_rate": 16000,
+        "duration": 1.0
+      },
+      "labels": [
+        "silence",
+        "speech",
+        "music",
+        "traffic",
+        "nature",
+        "machinery",
+        "crowd",
+        "indoor_quiet",
+        "outdoor_busy"
+      ]
+    }
+  }
+}

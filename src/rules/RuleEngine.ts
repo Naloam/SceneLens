@@ -78,10 +78,63 @@ export class RuleEngine {
       return;
     }
 
-    // 默认加载内置规则
-    // 在实际应用中，这里会从 assets 或远程加载 YAML 文件
-    // 目前使用硬编码的规则作为示例
-    this.rules = [
+    // 尝试从 YAML 规则文件加载，失败时回退硬编码规则
+    const loaded = this.loadBuiltInRulesFromYaml();
+    if (loaded.length > 0) {
+      this.rules = loaded;
+      return;
+    }
+
+    this.rules = this.getFallbackRules();
+  }
+
+  /**
+   * 加载内置 YAML 规则
+   */
+  private loadBuiltInRulesFromYaml(): Rule[] {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const YAML = require('yaml');
+      let raw: any = null;
+      let readError: unknown = null;
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const fs = require('fs');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const path = require('path');
+        const yamlPath = require.resolve('./commute.rule.yaml');
+        const baseDir = path.dirname(yamlPath);
+        const absolutePath = path.join(baseDir, 'commute.rule.yaml');
+        raw = fs?.readFileSync?.(absolutePath, 'utf8');
+      } catch (error) {
+        readError = error;
+      }
+
+      if (!raw) {
+        try {
+          // Metro 对 yaml 可能返回字符串或已解析对象，二者都兼容处理
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          raw = require('./commute.rule.yaml');
+        } catch (requireError) {
+          throw readError ?? requireError;
+        }
+      }
+
+      const parsed = typeof raw === 'string' && YAML?.parse ? YAML.parse(raw) : raw;
+      if (!parsed) return [];
+      return Array.isArray(parsed) ? (parsed as Rule[]) : [parsed as Rule];
+    } catch (error) {
+      console.warn('[RuleEngine] Failed to load YAML rule, fallback to defaults', error);
+      return [];
+    }
+  }
+
+  /**
+   * 硬编码兜底规则
+   */
+  private getFallbackRules(): Rule[] {
+    return [
       {
         id: 'RULE_COMMUTE',
         priority: 'HIGH',
