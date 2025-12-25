@@ -1,0 +1,10 @@
+<resources>
+  <string name="app_name">scenelens</string>
+  <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
+  <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
+  
+  <!-- Shortcut strings -->
+  <string name="shortcut_scene_analysis_short">场景识别</string>
+  <string name="shortcut_scene_analysis_long">触发场景识别</string>
+  <string name="shortcut_scene_analysis_disabled">场景识别功能暂时不可用</string>
+</resources>
