@@ -38,3 +38,15 @@ yarn-error.*
 
 # generated native folders
 /ios
+
+# Claude AI artifacts
+.claude/
+*.claude.*
+
+# Documentation files (except README)
+*.md
+!README.md
+docs/
+**/*.README.md
+**/*.demo.ts
+**/*.SUMMARY.md
