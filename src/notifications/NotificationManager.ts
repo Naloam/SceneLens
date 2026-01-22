@@ -1,6 +1,11 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import type { SceneType, Action } from '../types';
+import type {
+  SceneType,
+  Action,
+  SceneSuggestionPackage,
+  OneTapAction,
+} from '../types';
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
@@ -34,6 +39,38 @@ export interface NotificationAction {
   options?: {
     opensAppToForeground?: boolean;
   };
+}
+
+export interface DailySummaryNotification {
+  title: string;
+  body: string;
+  stats: {
+    commuteDuration?: number;
+    commuteCount?: number;
+    meetingCount?: number;
+    studyHours?: number;
+    steps?: number;
+  };
+}
+
+/**
+ * 基于场景执行建议包的通知
+ */
+export interface SceneSuggestionPackageNotification {
+  scenePackage: SceneSuggestionPackage;
+  confidence: number;
+  /**
+   * 自定义标题（可选，默认使用场景 displayName）
+   */
+  customTitle?: string;
+  /**
+   * 自定义正文（可选，默认使用检测要点）
+   */
+  customBody?: string;
+  /**
+   * 要显示的操作（可选，默认显示所有 primary 操作）
+   */
+  actions?: OneTapAction[];
 }
 
 class NotificationManagerClass {
@@ -307,6 +344,59 @@ class NotificationManagerClass {
   }
 
   /**
+   * Show daily summary notification
+   */
+  async showDailySummary(summary: DailySummaryNotification): Promise<string | null> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      // Build summary body
+      const summaryLines = [];
+      if (summary.stats.commuteCount !== undefined) {
+        summaryLines.push(`🚇 通勤 ${summary.stats.commuteCount} 次`);
+      }
+      if (summary.stats.commuteDuration !== undefined) {
+        summaryLines.push(`⏱️ 通勤时长 ${Math.round(summary.stats.commuteDuration)} 分钟`);
+      }
+      if (summary.stats.meetingCount !== undefined) {
+        summaryLines.push(`📅 会议 ${summary.stats.meetingCount} 场`);
+      }
+      if (summary.stats.studyHours !== undefined) {
+        summaryLines.push(`📚 学习 ${Math.round(summary.stats.studyHours)} 小时`);
+      }
+      if (summary.stats.steps !== undefined) {
+        summaryLines.push(`👣 步数 ${summary.stats.steps}`);
+      }
+
+      const body = summaryLines.length > 0
+        ? `${summary.body}\n\n${summaryLines.join('\n')}`
+        : summary.body;
+
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: summary.title,
+          body,
+          data: {
+            type: 'daily_summary',
+            stats: summary.stats,
+            timestamp: Date.now(),
+          },
+          categoryIdentifier: 'scene_suggestions',
+          sound: true,
+        },
+        trigger: null,
+      });
+
+      return notificationId;
+    } catch (error) {
+      console.error('Failed to show daily summary:', error);
+      return null;
+    }
+  }
+
+  /**
    * Show system notification
    */
   async showSystemNotification(title: string, body: string): Promise<string | null> {
@@ -434,6 +524,163 @@ class NotificationManagerClass {
    */
   async getPendingNotifications(): Promise<Notifications.NotificationRequest[]> {
     return await Notifications.getAllScheduledNotificationsAsync();
+  }
+
+  /**
+   * 显示基于场景执行建议包的通知
+   * 这是新的推荐方式，使用场景建议包配置来生成通知
+   */
+  async showSceneSuggestionPackage(
+    notification: SceneSuggestionPackageNotification
+  ): Promise<string | null> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      const { scenePackage, confidence, customTitle, customBody, actions } = notification;
+
+      // 构建通知标题
+      const title = customTitle ?? `${scenePackage.displayName}模式已准备`;
+
+      // 构建通知正文
+      let body = customBody;
+      if (!body) {
+        // 使用检测要点作为正文
+        const highlights = scenePackage.detectionHighlights.slice(0, 2);
+        body = highlights.length > 0
+          ? `检测到：${highlights.join('、')}`
+          : '已为您准备好相关操作';
+      }
+
+      // 构建操作按钮
+      const actionsToShow = actions ?? scenePackage.oneTapActions.filter(a => a.type === 'primary');
+      const primaryAction = actionsToShow[0];
+
+      // 构建 Android 操作按钮
+      const androidActions: Notifications.NotificationActionInput[] = [];
+
+      if (primaryAction && Platform.OS === 'android') {
+        androidActions.push({
+          identifier: `suggestion_${scenePackage.sceneId}_${primaryAction.id}`,
+          buttonTitle: primaryAction.label,
+          // 打开应用到前台以便执行操作
+          opensAppToForeground: true,
+        });
+      }
+
+      const secondaryAction = actionsToShow[1];
+      if (secondaryAction && Platform.OS === 'android') {
+        androidActions.push({
+          identifier: `suggestion_${scenePackage.sceneId}_${secondaryAction.id}`,
+          buttonTitle: secondaryAction.label,
+          opensAppToForeground: false,
+        });
+      }
+
+      const notificationContent: Notifications.NotificationContentInput = {
+        title,
+        body,
+        data: {
+          type: 'scene_suggestion_package',
+          sceneId: scenePackage.sceneId,
+          scenePackage: JSON.stringify(scenePackage),
+          confidence,
+          actions: actionsToShow.map(a => a.id),
+          timestamp: Date.now(),
+        },
+        categoryIdentifier: 'scene_suggestion',
+        sound: true,
+      };
+
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: notificationContent,
+        trigger: null,
+      });
+
+      console.log(`[NotificationManager] 已显示场景建议包通知: ${scenePackage.sceneId} (${notificationId})`);
+      return notificationId;
+    } catch (error) {
+      console.error('[NotificationManager] 显示场景建议包通知失败:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 显示场景建议包执行结果通知
+   */
+  async showSuggestionExecutionResult(
+    scenePackage: SceneSuggestionPackage,
+    success: boolean,
+    executedCount: number,
+    totalCount: number,
+    skippedCount: number
+  ): Promise<string | null> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      const title = success ? '✅ 场景执行成功' : '⚠️ 场景部分执行失败';
+
+      let body = `${scenePackage.displayName}：`;
+      if (success && skippedCount === 0) {
+        body += `已完成 ${executedCount} 项操作`;
+      } else if (success) {
+        body += `已完成 ${executedCount} 项，跳过 ${skippedCount} 项`;
+      } else {
+        body += `${executedCount}/${totalCount} 项操作成功`;
+      }
+
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data: {
+            type: 'suggestion_execution_result',
+            sceneId: scenePackage.sceneId,
+            success,
+            executedCount,
+            totalCount,
+            skippedCount,
+            timestamp: Date.now(),
+          },
+          categoryIdentifier: 'scene_execution',
+          sound: false,
+        },
+        trigger: null,
+      });
+
+      return notificationId;
+    } catch (error) {
+      console.error('[NotificationManager] 显示执行结果通知失败:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 为场景执行建议包设置 Android 通知类别
+   * 每个场景可以有自定义的操作按钮
+   */
+  async setupSceneSuggestionCategories(scenePackage: SceneSuggestionPackage): Promise<void> {
+    if (Platform.OS === 'android') {
+      // Android 使用动态定义的操作按钮，不需要预定义类别
+      return;
+    }
+
+    // iOS 需要预定义通知类别
+    const actions = scenePackage.oneTapActions.map(action => ({
+      identifier: `suggestion_${scenePackage.sceneId}_${action.id}`,
+      buttonTitle: action.label,
+      options: {
+        opensAppToForeground: action.action === 'execute_all',
+      } as const,
+    }));
+
+    await Notifications.setNotificationCategoryAsync(
+      `scene_suggestion_${scenePackage.sceneId}`,
+      actions
+    );
   }
 }
 

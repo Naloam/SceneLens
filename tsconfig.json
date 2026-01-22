@@ -17,6 +17,10 @@
     "**/*.tsx"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "**/*.demo.ts",
+    "**/*.demo.tsx",
+    "**/*.verify.ts",
+    "**/*.verify.tsx"
   ]
 }

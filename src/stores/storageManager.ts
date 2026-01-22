@@ -4,7 +4,14 @@
  * 提供统一的存储接口，用于管理用户配置、场景历史等数据
  */
 
-import type { UserConfig, SceneType, StorageKeys } from '../types';
+import type { 
+  UserConfig, 
+  SceneType, 
+  AppCategory, 
+  AppPreference, 
+  SceneHistory 
+} from '../types';
+import { StorageKeys } from '../types';
 
 /**
  * 简单的存储接口
@@ -169,6 +176,112 @@ class StorageManagerClass {
     } else {
       await this.enableAutoModeForScene(sceneType);
       return true;
+    }
+  }
+
+  /**
+   * 保存应用偏好
+   */
+  async saveAppPreferences(preferences: Map<AppCategory, AppPreference>): Promise<void> {
+    try {
+      const data = Array.from(preferences.entries());
+      const preferencesJson = JSON.stringify(data);
+      this.storage.set(StorageKeys.APP_PREFERENCES, preferencesJson);
+    } catch (error) {
+      console.error('Failed to save app preferences:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 加载应用偏好
+   */
+  async loadAppPreferences(): Promise<Map<AppCategory, AppPreference>> {
+    try {
+      const preferencesJson = this.storage.getString(StorageKeys.APP_PREFERENCES);
+      if (preferencesJson) {
+        const data = JSON.parse(preferencesJson);
+        return new Map(data);
+      }
+    } catch (error) {
+      console.warn('Failed to load app preferences:', error);
+    }
+    
+    // 返回空的 Map
+    return new Map();
+  }
+
+  /**
+   * 记录场景历史
+   */
+  async recordSceneHistory(history: SceneHistory): Promise<void> {
+    try {
+      const existing = await this.loadSceneHistory();
+      existing.push(history);
+      
+      // 只保留最近 1000 条记录
+      if (existing.length > 1000) {
+        existing.shift();
+      }
+      
+      const historyJson = JSON.stringify(existing);
+      this.storage.set(StorageKeys.SCENE_HISTORY, historyJson);
+    } catch (error) {
+      console.error('Failed to record scene history:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 加载场景历史
+   */
+  async loadSceneHistory(): Promise<SceneHistory[]> {
+    try {
+      const historyJson = this.storage.getString(StorageKeys.SCENE_HISTORY);
+      if (historyJson) {
+        return JSON.parse(historyJson);
+      }
+    } catch (error) {
+      console.warn('Failed to load scene history:', error);
+    }
+    
+    // 返回空数组
+    return [];
+  }
+
+  /**
+   * 获取特定场景的历史记录
+   */
+  async getSceneHistoryByType(sceneType: SceneType): Promise<SceneHistory[]> {
+    const allHistory = await this.loadSceneHistory();
+    return allHistory.filter(h => h.sceneType === sceneType);
+  }
+
+  /**
+   * 获取最近的场景历史记录
+   */
+  async getRecentSceneHistory(limit: number = 10): Promise<SceneHistory[]> {
+    const allHistory = await this.loadSceneHistory();
+    return allHistory
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  /**
+   * 清除过期的场景历史记录
+   */
+  async cleanupOldSceneHistory(daysToKeep: number = 30): Promise<void> {
+    try {
+      const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
+      const allHistory = await this.loadSceneHistory();
+      
+      const filteredHistory = allHistory.filter(h => h.timestamp > cutoffTime);
+      
+      const historyJson = JSON.stringify(filteredHistory);
+      this.storage.set(StorageKeys.SCENE_HISTORY, historyJson);
+    } catch (error) {
+      console.error('Failed to cleanup old scene history:', error);
+      throw error;
     }
   }
 

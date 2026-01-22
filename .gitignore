@@ -50,3 +50,6 @@ docs/
 **/*.README.md
 **/*.demo.ts
 **/*.SUMMARY.md
+
+# Windows special files
+**/nul

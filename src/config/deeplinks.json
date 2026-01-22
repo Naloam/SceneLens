@@ -1,0 +1,252 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2024-01-19",
+  "deeplinks": {
+    "transit": {
+      "alipay": {
+        "packageName": "com.eg.android.AlipayGphone",
+        "name": "支付宝",
+        "deeplinks": [
+          {
+            "url": "alipays://platformapi/startapp?appId=200011235",
+            "description": "乘车码",
+            "action": "open_ticket_qr",
+            "fallback": "打开首页"
+          },
+          {
+            "url": "alipays://platformapi/startapp?appId=20000023",
+            "description": "公交",
+            "action": "transit_bus",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "wechat": {
+        "packageName": "com.tencent.mm",
+        "name": "微信",
+        "deeplinks": [
+          {
+            "url": "weixin://",
+            "description": "打开微信",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "didi": {
+        "packageName": "com.sdu.didi.passenger",
+        "name": "滴滴出行",
+        "deeplinks": [
+          {
+            "url": "didi://",
+            "description": "打开滴滴",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      }
+    },
+    "calendar": {
+      "system": {
+        "packageName": "com.android.calendar",
+        "name": "系统日历",
+        "deeplinks": [
+          {
+            "url": "content://com.android.calendar/events",
+            "description": "日程",
+            "action": "open_events",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "feishu": {
+        "packageName": "com.ss.android.lark",
+        "name": "飞书",
+        "deeplinks": [
+          {
+            "url": "feishu://",
+            "description": "打开飞书",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      }
+    },
+    "meeting": {
+      "feishu": {
+        "packageName": "com.ss.android.lark",
+        "name": "飞书会议",
+        "deeplinks": [
+          {
+            "url": "feishu://",
+            "description": "打开飞书",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "tencentmeeting": {
+        "packageName": "com.tencent.mm",
+        "name": "腾讯会议",
+        "deeplinks": [
+          {
+            "url": "xl://",
+            "description": "打开腾讯会议",
+            "action": "open_meeting",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "dingtalk": {
+        "packageName": "com.alibaba.android.rimet",
+        "name": "钉钉",
+        "deeplinks": [
+          {
+            "url": "dingtalk://",
+            "description": "打开钉钉",
+            "action": "open_home",
+            "fallback": "打开首页"
+          },
+          {
+            "url": "dingtalk://dingtalkclient/v2/index.php?action=open_micro_app&corp_id=",
+            "description": "打开小程序",
+            "action": "open_mini_program",
+            "fallback": "打开首页"
+          }
+        ]
+      }
+    },
+    "music": {
+      "netease": {
+        "packageName": "com.netease.cloudmusic",
+        "name": "网易云音乐",
+        "deeplinks": [
+          {
+            "url": "orpheus://",
+            "description": "打开网易云",
+            "action": "open_player",
+            "fallback": "打开首页"
+          },
+          {
+            "url": "music://",
+            "description": "播放音乐",
+            "action": "play_music",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "qqmusic": {
+        "packageName": "com.tencent.qqmusic",
+        "name": "QQ音乐",
+        "deeplinks": [
+          {
+            "url": "qqmusic://",
+            "description": "打开QQ音乐",
+            "action": "open_player",
+            "fallback": "打开首页"
+          }
+        ]
+      }
+    },
+    "travel": {
+      "railway12306": {
+        "packageName": "com.MobileTicket",
+        "name": "铁路12306",
+        "deeplinks": [
+          {
+            "url": "cn.12306.mobile://",
+            "description": "打开12306",
+            "action": "open_ticket_qr",
+            "fallback": "打开首页"
+          },
+          {
+            "url": "cn.12306.mobile://myOrder/init",
+            "description": "我的订单",
+            "action": "open_orders",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "ctrip": {
+        "packageName": "ctrip.android.view",
+        "name": "携程",
+        "deeplinks": [
+          {
+            "url": "ctrip://",
+            "description": "打开携程",
+            "action": "open_home",
+            "fallback": "打开首页"
+          },
+          {
+            "url": "ctrip://hotel/list",
+            "description": "酒店列表",
+            "action": "open_hotels",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "variflight": {
+        "packageName": "cn.com.variflight.light",
+        "name": "飞常准",
+        "deeplinks": [
+          {
+            "url": "variflight://",
+            "description": "打开飞常准",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      }
+    },
+    "smart_home": {
+      "mihome": {
+        "packageName": "com.xiaomi.smarthome",
+        "name": "米家",
+        "deeplinks": [
+          {
+            "url": "mihome://",
+            "description": "打开米家",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      }
+    },
+    "study": {
+      "forest": {
+        "packageName": "camp.firefly.foresto",
+        "name": "专注森林",
+        "deeplinks": [
+          {
+            "url": "forest://",
+            "description": "打开专注森林",
+            "action": "open_focus",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "tomatodo": {
+        "packageName": "cn.tomorrow.do",
+        "name": "滴答清单",
+        "deeplinks": [
+          {
+            "url": "tomatodo://",
+            "description": "打开滴答清单",
+            "action": "open_tasks",
+            "fallback": "打开首页"
+          }
+        ]
+      }
+    }
+  },
+  "fallbackPackages": {
+    "TRANSIT_APP_TOP1": "com.eg.android.AlipayGphone",
+    "TRANSIT_APP_TOP2": "com.sdu.didi.passenger",
+    "MUSIC_PLAYER_TOP1": "com.netease.cloudmusic",
+    "CALENDAR_TOP1": "com.android.calendar",
+    "MEETING_APP_TOP1": "com.ss.android.lark",
+    "STUDY_APP_TOP1": "camp.firefly.foresto",
+    "TRAVEL_APP_TOP1": "com.MobileTicket",
+    "SMART_HOME_TOP1": "com.xiaomi.smarthome"
+  }
+}

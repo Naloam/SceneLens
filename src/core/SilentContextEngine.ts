@@ -13,8 +13,11 @@ import {
   Location,
   WiFiInfo,
   MotionState,
+  GeoFence,
 } from '../types';
 import { sceneBridge } from './SceneBridge';
+import { geoFenceManager } from '../stores/geoFenceManager';
+import { sceneCache, SceneCacheKeyBuilder } from '../utils/cacheManager';
 
 /**
  * 时间段定义
@@ -121,6 +124,11 @@ export class SilentContextEngine {
   private geoFences: Map<LocationType, { latitude: number; longitude: number; radius: number }> = new Map();
 
   /**
+   * 标记是否已从存储加载过围栏/WiFi 映射
+   */
+  private geoFenceLoaded = false;
+
+  /**
    * 已知 WiFi SSID 映射
    */
   private knownWiFiMap: Map<string, LocationType> = new Map();
@@ -139,18 +147,95 @@ export class SilentContextEngine {
   }
 
   /**
+   * 从存储加载地理围栏和 WiFi 映射
+   */
+  private async ensureGeoFencesLoaded(forceReload = false): Promise<void> {
+    if (this.geoFenceLoaded && !forceReload) {
+      return;
+    }
+
+    try {
+      await geoFenceManager.initialize();
+
+      // 清空已有映射，避免旧值残留
+      this.geoFences.clear();
+      this.knownWiFiMap.clear();
+
+      const fences = geoFenceManager.getAllGeoFences();
+      fences.forEach((fence: GeoFence) => {
+        const mappedType = this.mapFenceTypeToLocationType(fence.type);
+        if (mappedType) {
+          this.geoFences.set(mappedType, {
+            latitude: fence.latitude,
+            longitude: fence.longitude,
+            radius: fence.radius,
+          });
+
+          if (fence.wifiSSID) {
+            this.knownWiFiMap.set(fence.wifiSSID, mappedType);
+          }
+        }
+      });
+
+      this.geoFenceLoaded = true;
+    } catch (error) {
+      console.warn('Failed to load geo fences for SilentContextEngine:', error);
+    }
+  }
+
+  /**
+   * 将 GeoFenceType 映射为引擎内部的位置类型
+   */
+  private mapFenceTypeToLocationType(type: GeoFence['type']): LocationType | null {
+    switch (type) {
+      case 'HOME':
+        return 'HOME';
+      case 'OFFICE':
+        return 'OFFICE';
+      case 'SUBWAY_STATION':
+        return 'SUBWAY_STATION';
+      default:
+        return null;
+    }
+  }
+
+  /**
    * 获取当前上下文
-   * 
+   *
+   * 使用缓存优化场景判定性能，减少重复计算
+   *
    * @returns 静默上下文对象
    */
   async getContext(): Promise<SilentContext> {
+    const now = Date.now();
+    const signalTypes: SignalType[] = ['TIME'];
+
+    // 检查位置权限
+    const hasLocation = await this.hasLocationPermission();
+    if (hasLocation) signalTypes.push('LOCATION');
+    signalTypes.push('WIFI', 'MOTION');
+
+    const hasUsageStats = await this.hasUsageStatsPermission();
+    if (hasUsageStats) signalTypes.push('FOREGROUND_APP');
+
+    // 生成缓存键
+    const cacheKey = SceneCacheKeyBuilder.build(now, signalTypes);
+
+    // 尝试从缓存获取
+    const cached = sceneCache.get<SilentContext>(cacheKey);
+    if (cached) {
+      console.log('[SilentContextEngine] Cache hit for context');
+      return cached;
+    }
+
+    // 缓存未命中，执行完整计算
     const signals: ContextSignal[] = [];
 
     // 时间信号（始终可用）
     signals.push(this.getTimeSignal());
 
     // 位置信号（如果有权限）
-    if (await this.hasLocationPermission()) {
+    if (hasLocation) {
       const locationSignal = await this.getLocationSignal();
       if (locationSignal) {
         signals.push(locationSignal);
@@ -170,7 +255,7 @@ export class SilentContextEngine {
     }
 
     // 前台应用
-    if (await this.hasUsageStatsPermission()) {
+    if (hasUsageStats) {
       const appSignal = await this.getForegroundAppSignal();
       if (appSignal) {
         signals.push(appSignal);
@@ -178,7 +263,12 @@ export class SilentContextEngine {
     }
 
     // 场景推断
-    return this.inferScene(signals);
+    const context = this.inferScene(signals);
+
+    // 缓存结果
+    sceneCache.set(cacheKey, context);
+
+    return context;
   }
 
   /**
@@ -285,22 +375,29 @@ export class SilentContextEngine {
 
   /**
    * 获取位置信号
-   * 
+   *
    * @returns 位置上下文信号或 null
    */
   private async getLocationSignal(): Promise<ContextSignal | null> {
     try {
+      await this.ensureGeoFencesLoaded();
+
       const location = await sceneBridge.getCurrentLocation();
-      
+
       if (!location) {
         return null;
       }
 
       const locationType = this.classifyLocation(location);
 
+      // 仅使用位置类型用于规则匹配和场景映射，避免附带坐标导致匹配失败
+      const locationLabel = locationType;
+
+      // 即使位置类型是 UNKNOWN，也返回信号（因为位置坐标是有效的）
+      // 只返回类型字符串，坐标由引擎内部使用，不参与规则匹配
       return {
         type: 'LOCATION',
-        value: locationType,
+        value: locationLabel,
         weight: 0.8, // 位置信号权重较高
         timestamp: Date.now(),
       };
@@ -373,6 +470,8 @@ export class SilentContextEngine {
    */
   private async getWiFiSignal(): Promise<ContextSignal | null> {
     try {
+      await this.ensureGeoFencesLoaded();
+
       const wifiInfo = await sceneBridge.getConnectedWiFi();
       
       if (!wifiInfo) {
@@ -501,9 +600,10 @@ export class SilentContextEngine {
 
   /**
    * 推断场景
-   * 
+   *
    * 使用加权投票算法，根据各信号推断最可能的场景
-   * 
+   * 优化置信度计算，避免因为未知信号导致置信度过低
+   *
    * @param signals 上下文信号数组
    * @returns 静默上下文
    */
@@ -517,19 +617,32 @@ export class SilentContextEngine {
       sceneScores.set(scene, 0);
     }
 
-    // 计算总权重
-    let totalWeight = 0;
+    // 统计匹配条件和信号类型
+    let matchedConditions = 0;
+    const signalTypes = new Set<string>();
+    let totalEffectiveWeight = 0;
 
     // 遍历所有信号，累加场景得分
     for (const signal of signals) {
+      signalTypes.add(signal.type);
       const sceneMapping = this.signalToScenes(signal);
-      
-      for (const [scene, score] of sceneMapping) {
-        const currentScore = sceneScores.get(scene) || 0;
-        sceneScores.set(scene, currentScore + score * signal.weight);
+
+      // 对于未知位置/WiFi，降低权重影响
+      let effectiveWeight = signal.weight;
+      if (signal.value.includes('UNKNOWN') || signal.type === 'LOCATION' || signal.type === 'WIFI') {
+        // 如果位置或WiFi未知，权重减半但不完全忽略
+        effectiveWeight = signal.weight * 0.5;
+      } else {
+        // 明确匹配的信号计入匹配条件数
+        matchedConditions++;
       }
 
-      totalWeight += signal.weight;
+      for (const [scene, score] of sceneMapping) {
+        const currentScore = sceneScores.get(scene) || 0;
+        sceneScores.set(scene, currentScore + score * effectiveWeight);
+      }
+
+      totalEffectiveWeight += effectiveWeight;
     }
 
     // 选择得分最高的场景
@@ -543,8 +656,34 @@ export class SilentContextEngine {
       }
     }
 
-    // 计算置信度（归一化）
-    const confidence = totalWeight > 0 ? Math.min(maxScore / totalWeight, 1.0) : 0;
+    // 计算基础置信度
+    const rawConfidence = totalEffectiveWeight > 0 ? Math.min(maxScore / totalEffectiveWeight, 1.0) : 0;
+
+    // 智能置信度调整
+    let confidence = rawConfidence;
+
+    // 计算满足条件的比例（相对于总信号数）
+    const conditionRatio = signalTypes.size > 0 ? matchedConditions / signalTypes.size : 0;
+
+    // 根据满足条件的数量调整置信度
+    if (matchedConditions >= signalTypes.size * 0.7) {
+      // 大部分条件满足，提高置信度
+      confidence = Math.min(rawConfidence * 1.3, 0.95);
+    } else if (matchedConditions >= 2) {
+      // 至少两个条件满足，给予中等置信度提升
+      confidence = Math.min(rawConfidence * 1.15, 0.85);
+    } else if (matchedConditions === 1 && signalTypes.has('TIME')) {
+      // 只有时间信号匹配，给予基础置信度
+      confidence = Math.max(rawConfidence, 0.45);
+    }
+
+    // 确保最低置信度（时间信号总是可用的）
+    confidence = Math.max(confidence, 0.35);
+
+    // 调试日志
+    console.log(`[SilentContextEngine] Scene: ${bestScene}, Confidence: ${confidence.toFixed(2)}`);
+    console.log(`[SilentContextEngine] Signals: ${signals.length}, Matched: ${matchedConditions}, Ratio: ${conditionRatio.toFixed(2)}`);
+    console.log(`[SilentContextEngine] Scores:`, Object.fromEntries(sceneScores));
 
     return {
       timestamp: Date.now(),
@@ -855,7 +994,9 @@ export class SilentContextEngine {
     }
 
     try {
-      const hasPermission = await sceneBridge.checkPermission('location');
+      const hasPermission = typeof (sceneBridge as any).hasLocationPermission === 'function'
+        ? await (sceneBridge as any).hasLocationPermission()
+        : await sceneBridge.checkPermission('android.permission.ACCESS_FINE_LOCATION');
       this.permissionCache.location = hasPermission;
       this.permissionCache.lastChecked = Date.now();
       return hasPermission;
@@ -877,7 +1018,11 @@ export class SilentContextEngine {
     }
 
     try {
-      const hasPermission = await sceneBridge.checkPermission('usageStats');
+      const hasPermission = typeof (sceneBridge as any).hasUsageStatsPermission === 'function'
+        ? await (sceneBridge as any).hasUsageStatsPermission()
+        : typeof (sceneBridge as any).checkUsageStatsPermission === 'function'
+          ? await (sceneBridge as any).checkUsageStatsPermission()
+          : await sceneBridge.checkPermission('android.permission.PACKAGE_USAGE_STATS');
       this.permissionCache.usageStats = hasPermission;
       this.permissionCache.lastChecked = Date.now();
       return hasPermission;
@@ -916,6 +1061,13 @@ export class SilentContextEngine {
    */
   setKnownWiFi(ssid: string, type: LocationType): void {
     this.knownWiFiMap.set(ssid, type);
+  }
+
+  /**
+   * 强制刷新围栏配置（例如用户在配置页更新后调用）
+   */
+  async refreshGeoConfiguration(): Promise<void> {
+    await this.ensureGeoFencesLoaded(true);
   }
 
   /**

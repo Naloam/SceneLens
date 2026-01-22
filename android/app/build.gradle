@@ -181,11 +181,9 @@ dependencies {
 
     // Activity Recognition
     implementation("com.google.android.gms:play-services-location:21.3.0")
-    
-    // TensorFlow Lite dependencies (for react-native-fast-tflite)
-    implementation 'org.tensorflow:tensorflow-lite:2.13.0'
-    implementation 'org.tensorflow:tensorflow-lite-gpu:2.13.0'
-    implementation 'org.tensorflow:tensorflow-lite-nnapi:2.13.0'
+
+    // Note: react-native-fast-tflite manages its own TensorFlow Lite dependencies
+    // No need to add explicit TFLite dependencies here
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

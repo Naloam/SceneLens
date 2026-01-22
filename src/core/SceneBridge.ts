@@ -45,6 +45,25 @@ interface SceneBridgeNativeModule {
 
   // 日历
   getUpcomingEvents(hours: number): Promise<CalendarEvent[]>;
+  hasCalendarPermission(): Promise<boolean>;
+  requestCalendarPermission(): Promise<boolean>;
+
+  // 电池和闹钟
+  getBatteryStatus(): Promise<{
+    isCharging: boolean;
+    isFull: boolean;
+    batteryLevel: number;
+  }>;
+  getNextAlarm(): Promise<{
+    triggerTime: number;
+    hoursUntil: number;
+    hasAlarm: boolean;
+  } | null>;
+  isScreenOn(): Promise<boolean>;
+
+  // Wake Lock (屏幕常亮)
+  setWakeLock(enable: boolean, timeoutMs: number): Promise<{ enabled: boolean; timeout: number }>;
+  isWakeLockEnabled(): Promise<boolean>;
 
   // 权限
   requestPermission(permission: string): Promise<boolean>;
@@ -103,10 +122,17 @@ const fallback: SceneBridgeNativeModule = {
   async setBrightness(level: number) { return { level, brightness: level }; },
   async checkWriteSettingsPermission() { return false; },
   async openWriteSettingsSettings() { return false; },
-  async openAppWithDeepLink() { return false; },
+  async openAppWithDeepLink(_packageName?: string, _deepLink?: string) { return false; },
   async isAppInstalled() { return false; },
   async validateDeepLink() { return false; },
   async getUpcomingEvents() { return []; },
+  async hasCalendarPermission() { return false; },
+  async requestCalendarPermission() { return false; },
+  async getBatteryStatus() { return { isCharging: false, isFull: false, batteryLevel: 0 }; },
+  async getNextAlarm() { return null; },
+  async isScreenOn() { return true; },
+  async setWakeLock(enable: boolean, timeoutMs: number) { return { enabled: enable, timeout: timeoutMs }; },
+  async isWakeLockEnabled() { return false; },
   async requestPermission() { return false; },
   async checkPermission() { return false; },
   async checkUsageStatsPermission() { return false; },
@@ -154,6 +180,12 @@ const resolvedModule: SceneBridgeNativeModule = SceneBridge ?? fallback;
 // This prevents runtime TypeError when native side has not implemented newer APIs.
 const sceneBridge: SceneBridgeNativeModule = { ...fallback, ...resolvedModule };
 
+// Ensure native side always receives both arguments (packageName, deepLink) to match
+// the method signature that expects two JS params plus the promise callbacks.
+sceneBridge.openAppWithDeepLink = async (packageName: string, deepLink?: string) => {
+  return resolvedModule.openAppWithDeepLink(packageName, deepLink ?? null);
+};
+
 sceneBridge.captureImage = async () => {
   let granted: boolean | undefined;
 
@@ -197,6 +229,55 @@ sceneBridge.recordAudio = async (durationMs: number) => {
     throw new Error('Microphone permission not granted');
   }
   return resolvedModule.recordAudio(durationMs);
+};
+
+// Battery status - no special permission needed
+sceneBridge.getBatteryStatus = async () => {
+  return resolvedModule.getBatteryStatus();
+};
+
+// Next alarm - no special permission needed for reading
+sceneBridge.getNextAlarm = async () => {
+  return resolvedModule.getNextAlarm();
+};
+
+// Screen state - no special permission needed
+sceneBridge.isScreenOn = async () => {
+  return resolvedModule.isScreenOn();
+};
+
+// Wake lock - requires WAKE_LOCK permission
+sceneBridge.setWakeLock = async (enable: boolean, timeoutMs: number) => {
+  // Check for wake lock permission
+  const hasPermission = await sceneBridge.checkPermission('android.permission.WAKE_LOCK');
+  if (!hasPermission) {
+    console.warn('Wake lock permission not granted, skipping');
+    return { enabled: false, timeout: 0 };
+  }
+  return resolvedModule.setWakeLock(enable, timeoutMs);
+};
+
+sceneBridge.isWakeLockEnabled = async () => {
+  return resolvedModule.isWakeLockEnabled();
+};
+
+// Calendar events - requires READ_CALENDAR permission
+sceneBridge.getUpcomingEvents = async (hours: number) => {
+  // Check for calendar permission
+  const hasPermission = await sceneBridge.hasCalendarPermission();
+  if (!hasPermission) {
+    console.warn('Calendar permission not granted, returning empty events');
+    return [];
+  }
+  return resolvedModule.getUpcomingEvents(hours);
+};
+
+sceneBridge.hasCalendarPermission = async () => {
+  return resolvedModule.hasCalendarPermission();
+};
+
+sceneBridge.requestCalendarPermission = async () => {
+  return resolvedModule.requestCalendarPermission();
 };
 
 /**

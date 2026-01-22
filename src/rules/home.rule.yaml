@@ -1,0 +1,59 @@
+# 到家场景规则
+id: RULE_HOME
+priority: HIGH
+mode: ONE_TAP  # SUGGEST_ONLY | ONE_TAP | AUTO
+enabled: true
+
+conditions:
+  # HOME 地理围栏内
+  - type: location
+    value: HOME
+    weight: 0.9
+
+  # 家庭 Wi-Fi 连接
+  - type: wifi
+    value: HOME_WIFI
+    weight: 0.8
+
+  # 静止或步行状态
+  - type: motion
+    value: STILL
+    weight: 0.4
+
+  - type: motion
+    value: WALKING
+    weight: 0.5
+
+actions:
+  # 关闭勿扰模式
+  - target: system
+    action: setDoNotDisturb
+    params:
+      enable: false
+
+  # 调整屏幕亮度（舒适模式）
+  - target: system
+    action: setBrightness
+    params:
+      level: 0.7  # 70% 亮度
+      auto: false
+
+  # 打开智能家居控制应用
+  - target: app
+    intent: SMART_HOME_TOP1
+    action: launch
+    params:
+      mode: 'home'
+
+  # 显示今日总结卡片
+  - target: notification
+    action: suggest
+    params:
+      title: '欢迎回家'
+      body: '已为您准备今日总结'
+      mode: 'ONE_TAP'
+      actions:
+        - label: '查看总结'
+          action: 'execute'
+        - label: '稍后'
+          action: 'ignore'

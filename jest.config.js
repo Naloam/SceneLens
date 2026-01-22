@@ -18,6 +18,9 @@ module.exports = {
     '\\.tflite$': '<rootDir>/src/__mocks__/tflite-mock.js',
     'react-native': '<rootDir>/src/__mocks__/react-native.js',
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!(expo-modules-core|expo-modules-core|expo-constants|expo-keep-awkake|expo-device|expo-notifications|@expo|metro))/',
+  ],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
       tsconfig: {

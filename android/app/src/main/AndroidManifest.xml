@@ -16,7 +16,14 @@
   <uses-permission android:name="android.permission.READ_CALENDAR"/>
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+  <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
   <queries>
+    <!-- 允许查询所有已安装的应用（需要 QUERY_ALL_PACKAGES 权限） -->
+    <intent>
+      <action android:name="android.intent.action.MAIN"/>
+      <category android:name="android.intent.category.LAUNCHER"/>
+    </intent>
+    <!-- 浏览器相关 -->
     <intent>
       <action android:name="android.intent.action.VIEW"/>
       <category android:name="android.intent.category.BROWSABLE"/>

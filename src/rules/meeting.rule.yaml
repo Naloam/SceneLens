@@ -1,0 +1,72 @@
+# 会议场景规则
+id: RULE_MEETING
+priority: HIGH
+mode: ONE_TAP  # SUGGEST_ONLY | ONE_TAP | AUTO
+enabled: true
+
+conditions:
+  # 工作日时间
+  - type: time
+    value: WORKDAY  # 周一到周五
+    weight: 0.5
+  
+  # 工作时间段
+  - type: time
+    value: WORK_HOURS  # 9:00-18:00
+    weight: 0.6
+  
+  # 办公室位置
+  - type: location
+    value: OFFICE
+    weight: 0.8
+  
+  # 静止状态（在会议室坐着）
+  - type: motion
+    value: STILL
+    weight: 0.4
+  
+  # 日历中有即将开始的会议
+  - type: calendar
+    value: UPCOMING_MEETING  # 未来1小时内有会议
+    weight: 0.9
+  
+  # 会议应用使用历史
+  - type: app_usage
+    intent: MEETING_APP_TOP1
+    weight: 0.3
+
+actions:
+  # 开启勿扰模式（允许重要通话）
+  - target: system
+    action: setDoNotDisturb
+    params:
+      enable: true
+      allowCalls: true
+      allowImportantInterruptions: true
+      whitelist: ['work_contacts', 'meeting_apps']
+  
+  # 打开日历应用查看会议详情
+  - target: app
+    intent: CALENDAR_TOP1
+    action: open_meeting_details
+    deepLink: 'content://com.android.calendar/events'
+  
+  # 可选：打开会议应用
+  - target: app
+    intent: MEETING_APP_TOP1
+    action: launch_meeting
+    params:
+      autoJoin: false  # 不自动加入，只是准备好
+  
+  # 发送通知
+  - target: notification
+    action: suggest
+    params:
+      title: '会议模式已准备'
+      body: '开启勿扰模式并打开日历'
+      mode: 'ONE_TAP'
+      actions:
+        - label: '开启'
+          action: 'execute'
+        - label: '稍后'
+          action: 'ignore'

@@ -411,3 +411,113 @@ export interface TriggerDecision {
   sceneType?: SceneType;
   confidence?: number;
 }
+
+// ==================== 场景执行建议包 ====================
+
+/**
+ * 一键操作类型
+ */
+export type OneTapActionType = 'primary' | 'secondary';
+
+/**
+ * 一键操作动作
+ */
+export type OneTapActionKind = 'execute_all' | 'dismiss' | 'snooze';
+
+/**
+ * 系统调整项
+ */
+export interface SystemAdjustment {
+  id: string;
+  label: string;
+  description: string;
+  action: string;
+  params?: Record<string, any>;
+}
+
+/**
+ * 应用启动项
+ */
+export interface AppLaunch {
+  id: string;
+  label: string;
+  description: string;
+  intent?: string;
+  action: string;
+  deepLink?: string;
+  params?: Record<string, any>;
+  fallbackAction: string;
+}
+
+/**
+ * 一键操作
+ */
+export interface OneTapAction {
+  id: string;
+  label: string;
+  description: string;
+  type: OneTapActionType;
+  action: OneTapActionKind;
+  params?: Record<string, any>;
+}
+
+/**
+ * 降级说明
+ */
+export interface FallbackNote {
+  condition: string;
+  message: string;
+  action: string;
+}
+
+/**
+ * 场景执行建议包
+ */
+export interface SceneSuggestionPackage {
+  sceneId: SceneType;
+  displayName: string;
+  icon: string;
+  color: string;
+  detectionHighlights: string[];
+  systemAdjustments: SystemAdjustment[];
+  appLaunches: AppLaunch[];
+  oneTapActions: OneTapAction[];
+  fallbackNotes: FallbackNote[];
+}
+
+/**
+ * 场景建议包配置
+ */
+export interface SceneSuggestionsConfig {
+  version: string;
+  lastUpdated: string;
+  description: string;
+  scenes: SceneSuggestionPackage[];
+}
+
+/**
+ * 用户对建议包的响应
+ */
+export interface SuggestionResponse {
+  sceneId: SceneType;
+  actionId: string;
+  actionType: OneTapActionKind;
+  timestamp: number;
+}
+
+/**
+ * 建议包执行结果
+ */
+export interface SuggestionExecutionResult {
+  sceneId: SceneType;
+  success: boolean;
+  executedActions: Array<{
+    type: 'system' | 'app';
+    description: string;
+    success: boolean;
+    error?: string;
+  }>;
+  skippedActions: string[];
+  fallbackApplied: boolean;
+  timestamp: number;
+}

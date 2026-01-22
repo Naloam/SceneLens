@@ -24,6 +24,7 @@ interface SamplingIntervals {
   motion: number;        // 运动状态采样间隔
   wifi: number;          // Wi-Fi 采样间隔
   foregroundApp: number; // 前台应用采样间隔
+  calendar: number;      // 日历事件采样间隔
 }
 
 /**
@@ -44,6 +45,7 @@ export class SilentContextEngine {
     motion: 30 * 1000,            // 30秒
     wifi: 2 * 60 * 1000,          // 2分钟
     foregroundApp: 10 * 1000,     // 10秒
+    calendar: 10 * 60 * 1000,     // 10分钟（日历事件变化较少）
   };
 
   /**
@@ -92,6 +94,7 @@ export class SilentContextEngine {
 
     // 时间信号（始终可用，无需权限）
     signals.push(this.getTimeSignal());
+    signals.push(this.getWorkdaySignal());
 
     // 位置信号（如果有权限且到达采样时间）
     try {
@@ -166,6 +169,24 @@ export class SilentContextEngine {
       console.warn('Failed to get foreground app signal:', error);
     }
 
+    // 日历信号
+    try {
+      if (await this.shouldSample('CALENDAR')) {
+        const calendarSignal = await this.getCalendarSignal();
+        if (calendarSignal) {
+          signals.push(calendarSignal);
+          this.updateCache('CALENDAR', calendarSignal);
+        }
+      } else {
+        const cached = this.signalCache.get('CALENDAR');
+        if (cached) {
+          signals.push(cached);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to get calendar signal:', error);
+    }
+
     // 场景推断
     const result = this.inferScene(signals);
 
@@ -221,6 +242,25 @@ export class SilentContextEngine {
       type: 'TIME',
       value: timeValue,
       weight,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * 获取工作日信号
+   * 单独的信号用于检测是否为工作日
+   * 
+   * @returns 工作日信号
+   */
+  getWorkdaySignal(): ContextSignal {
+    const now = new Date();
+    const day = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const isWeekday = day >= 1 && day <= 5;
+
+    return {
+      type: 'TIME',
+      value: isWeekday ? 'WORKDAY' : 'WEEKEND',
+      weight: 0.8,
       timestamp: Date.now(),
     };
   }
@@ -420,6 +460,61 @@ export class SilentContextEngine {
   }
 
   /**
+   * 获取日历信号
+   * Requirements: 需求 3.1 - 检测即将开始的会议
+   * 
+   * @returns 日历信号或 null
+   */
+  private async getCalendarSignal(): Promise<ContextSignal | null> {
+    try {
+      // 检查未来1小时内的日历事件
+      const events = await sceneBridge.getUpcomingEvents(1);
+      
+      if (!events || events.length === 0) {
+        return {
+          type: 'CALENDAR',
+          value: 'NO_EVENTS',
+          weight: 0.3,
+          timestamp: Date.now(),
+        };
+      }
+
+      const now = Date.now();
+      let upcomingMeeting = false;
+      let weight = 0.5;
+
+      // 检查是否有即将开始的会议（未来30分钟内）
+      for (const event of events) {
+        const timeToStart = event.startTime - now;
+        
+        // 如果会议在未来30分钟内开始
+        if (timeToStart > 0 && timeToStart <= 30 * 60 * 1000) {
+          upcomingMeeting = true;
+          weight = 0.9; // 高权重，因为即将开始的会议是强信号
+          break;
+        }
+        
+        // 如果会议正在进行中
+        if (event.startTime <= now && event.endTime > now) {
+          upcomingMeeting = true;
+          weight = 0.95; // 最高权重，正在进行的会议
+          break;
+        }
+      }
+
+      return {
+        type: 'CALENDAR',
+        value: upcomingMeeting ? 'UPCOMING_MEETING' : 'HAS_EVENTS',
+        weight,
+        timestamp: now,
+      };
+    } catch (error) {
+      // 权限未授予或其他错误
+      return null;
+    }
+  }
+
+  /**
    * 场景推断 - 简单加权投票
    * Requirements: 需求 1.3 - 输出场景标签和置信度
    * 
@@ -500,6 +595,9 @@ export class SilentContextEngine {
       case 'FOREGROUND_APP':
         this.mapAppToScenes(signal.value, scenes);
         break;
+      case 'CALENDAR':
+        this.mapCalendarToScenes(signal.value, scenes);
+        break;
       default:
         break;
     }
@@ -519,6 +617,10 @@ export class SilentContextEngine {
       case 'WORK_HOURS':
         scenes.set('OFFICE', 0.8);
         scenes.set('STUDY', 0.3);
+        break;
+      case 'WORKDAY':
+        scenes.set('OFFICE', 0.6);
+        scenes.set('COMMUTE', 0.3);
         break;
       case 'EVENING':
         scenes.set('HOME', 0.6);
@@ -616,6 +718,25 @@ export class SilentContextEngine {
   }
 
   /**
+   * 日历信号到场景的映射
+   */
+  private mapCalendarToScenes(calendarValue: string, scenes: SceneScores): void {
+    switch (calendarValue) {
+      case 'UPCOMING_MEETING':
+        scenes.set('OFFICE', 1.0); // 即将开始的会议强烈指向办公场景
+        break;
+      case 'HAS_EVENTS':
+        scenes.set('OFFICE', 0.6); // 有日历事件但不紧急
+        break;
+      case 'NO_EVENTS':
+        // 没有事件不提供场景信息，但可以排除某些场景
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
    * 判断是否应该进行采样
    * 
    * @param signalType 信号类型
@@ -638,6 +759,9 @@ export class SilentContextEngine {
         break;
       case 'FOREGROUND_APP':
         interval = this.samplingIntervals.foregroundApp;
+        break;
+      case 'CALENDAR':
+        interval = this.samplingIntervals.calendar;
         break;
       default:
         return true;

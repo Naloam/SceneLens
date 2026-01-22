@@ -1,37 +1,18 @@
 import { SilentContext, SceneType } from '../types';
+import { ruleCache, SceneCacheKeyBuilder } from '../utils/cacheManager';
 
-/**
- * 规则优先级
- */
+// 规则引擎专用类型（简化版本，不包含 battery/screen 等扩展类型）
 export type RulePriority = 'LOW' | 'MEDIUM' | 'HIGH';
-
-/**
- * 规则模式
- */
 export type RuleMode = 'SUGGEST_ONLY' | 'ONE_TAP' | 'AUTO';
-
-/**
- * 条件类型
- */
 export type ConditionType = 'time' | 'location' | 'motion' | 'wifi' | 'app_usage' | 'calendar';
-
-/**
- * 动作目标
- */
 export type ActionTarget = 'system' | 'app' | 'notification';
 
-/**
- * 规则条件
- */
 export interface Condition {
   type: ConditionType;
   value: string;
   weight: number;
 }
 
-/**
- * 规则动作
- */
 export interface Action {
   target: ActionTarget;
   action: string;
@@ -40,9 +21,6 @@ export interface Action {
   params?: Record<string, any>;
 }
 
-/**
- * 规则定义
- */
 export interface Rule {
   id: string;
   priority: RulePriority;
@@ -52,9 +30,6 @@ export interface Rule {
   actions: Action[];
 }
 
-/**
- * 匹配的规则
- */
 export interface MatchedRule {
   rule: Rule;
   score: number;
@@ -89,45 +64,49 @@ export class RuleEngine {
   }
 
   /**
-   * 加载内置 YAML 规则
+   * 加载内置规则
+   * Metro bundler 不支持动态 require，需要静态导入
+   * 使用 .js 文件而不是 .yaml 文件
    */
   private loadBuiltInRulesFromYaml(): Rule[] {
-    try {
+    const allRules: Rule[] = [];
+
+    // 静态导入规则文件（Metro 要求）
+    const ruleImports = [
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const YAML = require('yaml');
-      let raw: any = null;
-      let readError: unknown = null;
+      () => require('./commute.rule.js'),
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      () => require('./meeting.rule.js'),
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      () => require('./study.rule.js'),
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      () => require('./home.rule.js'),
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      () => require('./office.rule.js'),
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      () => require('./sleep.rule.js'),
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      () => require('./travel.rule.js'),
+    ];
 
+    const ruleFileNames = ['commute.rule.js', 'meeting.rule.js', 'study.rule.js', 'home.rule.js', 'office.rule.js', 'sleep.rule.js', 'travel.rule.js'];
+
+    for (let i = 0; i < ruleImports.length; i++) {
+      const ruleFile = ruleFileNames[i];
       try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const fs = require('fs');
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const path = require('path');
-        const yamlPath = require.resolve('./commute.rule.yaml');
-        const baseDir = path.dirname(yamlPath);
-        const absolutePath = path.join(baseDir, 'commute.rule.yaml');
-        raw = fs?.readFileSync?.(absolutePath, 'utf8');
-      } catch (error) {
-        readError = error;
-      }
+        const importRule = ruleImports[i];
+        const rules = importRule();
 
-      if (!raw) {
-        try {
-          // Metro 对 yaml 可能返回字符串或已解析对象，二者都兼容处理
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          raw = require('./commute.rule.yaml');
-        } catch (requireError) {
-          throw readError ?? requireError;
+        if (Array.isArray(rules)) {
+          allRules.push(...rules);
+          console.log(`[RuleEngine] Loaded ${ruleFile}: ${rules.length} rule(s)`);
         }
+      } catch (error) {
+        console.warn(`[RuleEngine] Failed to load ${ruleFile}, skipping`, error);
       }
-
-      const parsed = typeof raw === 'string' && YAML?.parse ? YAML.parse(raw) : raw;
-      if (!parsed) return [];
-      return Array.isArray(parsed) ? (parsed as Rule[]) : [parsed as Rule];
-    } catch (error) {
-      console.warn('[RuleEngine] Failed to load YAML rule, fallback to defaults', error);
-      return [];
     }
+
+    return allRules;
   }
 
   /**
@@ -189,17 +168,35 @@ export class RuleEngine {
   /**
    * 匹配规则
    * 根据当前场景上下文匹配适用的规则
+   * 使用缓存优化性能
    */
   async matchRules(context: SilentContext): Promise<MatchedRule[]> {
+    // 生成缓存键
+    const contextKey = `${context.context}_${context.confidence.toFixed(2)}_${context.signals.map(s => s.type).sort().join(',')}`;
+    const cacheKey = SceneCacheKeyBuilder.buildRulesKey(contextKey);
+
+    // 尝试从缓存获取
+    const cached = ruleCache.get<MatchedRule[]>(cacheKey);
+    if (cached) {
+      console.log('[RuleEngine] Cache hit for matched rules');
+      return cached;
+    }
+
     const matched: MatchedRule[] = [];
+
+    // 添加调试日志
+    console.log(`[RuleEngine] Matching rules for context: ${context.context}, confidence: ${context.confidence.toFixed(2)}`);
+    console.log(`[RuleEngine] Available signals:`, context.signals.map(s => `${s.type}=${s.value}`));
 
     for (const rule of this.rules) {
       if (!rule.enabled) continue;
 
       const score = this.calculateRuleScore(rule, context);
 
-      if (score > 0.5) {
-        // 阈值 - lowered from 0.6 to 0.5 to allow partial matches
+      console.log(`[RuleEngine] Rule ${rule.id} score: ${score.toFixed(2)}`);
+
+      if (score > 0.4) {
+        // 降低阈值从 0.5 到 0.4，允许更多部分匹配
         matched.push({
           rule,
           score,
@@ -208,13 +205,20 @@ export class RuleEngine {
       }
     }
 
+    console.log(`[RuleEngine] Matched ${matched.length} rule(s)`);
+
     // 按优先级和得分排序
-    return matched.sort((a, b) => {
+    const result = matched.sort((a, b) => {
       if (a.rule.priority !== b.rule.priority) {
         return this.priorityValue(b.rule.priority) - this.priorityValue(a.rule.priority);
       }
       return b.score - a.score;
     });
+
+    // 缓存结果
+    ruleCache.set(cacheKey, result);
+
+    return result;
   }
 
   /**
@@ -238,6 +242,7 @@ export class RuleEngine {
 
   /**
    * 检查条件是否满足
+   * 支持精确匹配和智能模糊匹配
    */
   private checkCondition(condition: Condition, context: SilentContext): boolean {
     // 查找匹配的信号
@@ -247,8 +252,30 @@ export class RuleEngine {
 
     if (!signal) return false;
 
-    // 检查值是否匹配
-    return signal.value === condition.value;
+    // 精确匹配
+    if (signal.value === condition.value) {
+      return true;
+    }
+
+    // 时间信号的特殊处理：支持前缀匹配
+    if (condition.type === 'time') {
+      const signalPeriod = signal.value.split('_')[0]; // 提取时间段部分
+      const conditionPeriod = condition.value.split('_')[0];
+
+      // 如果时间段相同，就认为匹配（不管是否 WEEKDAY/WEEKEND）
+      if (signalPeriod === conditionPeriod) {
+        console.log(`[RuleEngine] Time prefix match: ${signal.value} matches ${condition.value}`);
+        return true;
+      }
+    }
+
+    // 位置信号的特殊处理：UNKNOWN 位置不影响规则匹配
+    if (condition.type === 'location' && signal.value === 'UNKNOWN') {
+      console.log(`[RuleEngine] Unknown location, skipping location condition`);
+      return false; // 位置条件不满足，但不影响其他条件
+    }
+
+    return false;
   }
 
   /**
@@ -303,3 +330,9 @@ export class RuleEngine {
     }
   }
 }
+
+// 导出单例实例
+export const ruleEngine = new RuleEngine();
+
+// 默认导出类
+export default RuleEngine;

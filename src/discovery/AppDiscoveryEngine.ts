@@ -26,6 +26,20 @@ export class AppDiscoveryEngine {
   private initialized: boolean = false;
 
   /**
+   * 兜底候选包名，用于各类别缺省时的填充
+   */
+  private readonly fallbackCandidates: Record<AppCategory, string[]> = {
+    MUSIC_PLAYER: ['com.netease.cloudmusic', 'com.tencent.qqmusic', 'com.spotify.music'],
+    TRANSIT_APP: ['com.eg.android.AlipayGphone', 'com.sdu.didi.psnger', 'com.autonavi.minimap', 'com.baidu.BaiduMap', 'com.tencent.map'],
+    PAYMENT_APP: ['com.eg.android.AlipayGphone', 'com.tencent.mm'],
+    MEETING_APP: ['com.tencent.wework', 'com.tencent.wemeet.app', 'com.ss.android.lark', 'us.zoom.videomeetings', 'com.microsoft.teams'],
+    STUDY_APP: ['com.duolingo', 'com.yc.seed', 'com.tencent.edu', 'com.youdao.dict'],
+    SMART_HOME: ['com.xiaomi.smarthome', 'com.yeelight.cherry', 'com.tuya.smart'],
+    CALENDAR: ['com.android.calendar', 'com.google.android.calendar', 'com.tencent.qcalendar'],
+    OTHER: [],
+  };
+
+  /**
    * 初始化应用发现引擎
    * 扫描已安装应用、分类、获取使用统计、计算偏好
    */
@@ -34,8 +48,21 @@ export class AppDiscoveryEngine {
       console.log('[AppDiscoveryEngine] Initializing...');
 
       // 1. 扫描已安装应用
-      const rawApps = await sceneBridge.getInstalledApps();
-      console.log(`[AppDiscoveryEngine] Found ${rawApps.length} installed apps`);
+      let rawApps: AppInfo[] = [];
+
+      try {
+        rawApps = await sceneBridge.getInstalledApps();
+        console.log(`[AppDiscoveryEngine] Found ${rawApps.length} installed apps`);
+      } catch (error) {
+        console.warn('[AppDiscoveryEngine] getInstalledApps failed, using fallback dataset:', error);
+        rawApps = [];
+      }
+
+      // 如果原生层暂未返回数据或调用失败，使用兜底样本，确保 UI 有内容可展示
+      if (!rawApps || rawApps.length === 0) {
+        console.warn('[AppDiscoveryEngine] Installed app list is empty, using fallback dataset');
+        rawApps = this.getFallbackApps();
+      }
 
       // 2. 分类应用
       this.apps = rawApps.map(app => ({
@@ -70,6 +97,9 @@ export class AppDiscoveryEngine {
         });
       }
 
+      // 5. 为缺失类别填充兜底应用（优先已安装，否则用示例包名）
+      this.fillMissingCategoriesWithFallbacks(rawApps);
+
       this.initialized = true;
       console.log('[AppDiscoveryEngine] Initialization complete');
     } catch (error) {
@@ -81,7 +111,7 @@ export class AppDiscoveryEngine {
   /**
    * 检测应用类别
    * 基于包名和应用名的启发式规则
-   * 
+   *
    * @param app 应用信息
    * @returns 应用类别
    */
@@ -89,7 +119,7 @@ export class AppDiscoveryEngine {
     const packageName = app.packageName.toLowerCase();
     const appName = app.appName.toLowerCase();
 
-    // 音乐播放器
+    // 音乐播放器 - 扩展关键词
     if (
       packageName.includes('music') ||
       packageName.includes('spotify') ||
@@ -97,14 +127,26 @@ export class AppDiscoveryEngine {
       packageName.includes('qqmusic') ||
       packageName.includes('kugou') ||
       packageName.includes('kuwo') ||
+      packageName.includes('migu') ||
+      packageName.includes('joyose') ||
+      packageName.includes('kgmusic') ||
+      packageName.includes('melon') ||
       appName.includes('music') ||
       appName.includes('音乐') ||
-      appName.includes('spotify')
+      appName.includes('spotify') ||
+      appName.includes('网易云') ||
+      appName.includes('酷狗') ||
+      appName.includes('酷我') ||
+      appName.includes('咪咕') ||
+      appName.includes('汽水') ||
+      appName.includes('千千') ||
+      appName.includes('荔枝') ||
+      appName.includes('喜马拉雅')
     ) {
       return 'MUSIC_PLAYER';
     }
 
-    // 交通出行
+    // 交通出行 - 扩展关键词
     if (
       packageName.includes('metro') ||
       packageName.includes('transit') ||
@@ -112,27 +154,50 @@ export class AppDiscoveryEngine {
       packageName.includes('didi') ||
       packageName.includes('uber') ||
       packageName.includes('12306') ||
-      (packageName.includes('alipay') && appName.includes('乘车')) ||
+      packageName.includes('ctrip') ||
+      packageName.includes('qunar') ||
+      packageName.includes('tuniu') ||
+      packageName.includes('map') ||
+      packageName.includes('amap') ||
+      packageName.includes('baidu') ||
+      packageName.includes('tencent') && packageName.includes('map') ||
+      packageName.includes('gaode') ||
+      packageName.includes('navinfo') ||
+      packageName.includes('alipay') && appName.includes('乘车') ||
       appName.includes('地铁') ||
       appName.includes('公交') ||
       appName.includes('出行') ||
-      appName.includes('打车')
+      appName.includes('打车') ||
+      appName.includes('地图') ||
+      appName.includes('乘车') ||
+      appName.includes('火车') ||
+      appName.includes('高铁') ||
+      appName.includes('携程') ||
+      appName.includes('去哪儿') ||
+      appName.includes('途牛') ||
+      appName.includes('航旅')
     ) {
       return 'TRANSIT_APP';
     }
 
-    // 支付应用
+    // 支付应用 - 扩展中国支付应用
     if (
       packageName.includes('alipay') ||
       packageName.includes('wechat') ||
+      packageName.includes('tenpay') ||
       packageName.includes('pay') ||
+      packageName.includes('unionpay') ||
+      packageName.includes('cloudpay') ||
       appName.includes('支付宝') ||
-      appName.includes('微信支付')
+      appName.includes('微信支付') ||
+      appName.includes('云闪付') ||
+      appName.includes('银联') ||
+      appName.includes('钱包')
     ) {
       return 'PAYMENT_APP';
     }
 
-    // 会议应用
+    // 会议应用 - 扩展关键词，增加更多中国会议应用
     if (
       packageName.includes('zoom') ||
       packageName.includes('teams') ||
@@ -140,17 +205,31 @@ export class AppDiscoveryEngine {
       packageName.includes('webex') ||
       packageName.includes('dingtalk') ||
       packageName.includes('feishu') ||
-      packageName.includes('wechat.work') ||
+      packageName.includes('lark') ||
+      packageName.includes('wework') ||
+      packageName.includes('tencent') && (packageName.includes('meeting') || packageName.includes('conference') || packageName.includes('voov')) ||
+      packageName.includes('qixin') ||
+      packageName.includes('linknow') ||
+      packageName.includes('vmos') ||
+      packageName.includes('meebox') ||
       appName.includes('zoom') ||
+      appName.includes('teams') ||
       appName.includes('会议') ||
       appName.includes('钉钉') ||
       appName.includes('飞书') ||
-      appName.includes('企业微信')
+      appName.includes('企业微信') ||
+      appName.includes('腾讯会议') ||
+      appName.includes('voov') ||
+      appName.includes('随心') ||
+      appName.includes('七辛') ||
+      appName.includes('会易') ||
+      appName.includes('瞩目') ||
+      appName.includes('全时')
     ) {
       return 'MEETING_APP';
     }
 
-    // 学习应用
+    // 学习应用 - 扩展关键词，增加更多中国学习应用
     if (
       packageName.includes('study') ||
       packageName.includes('learn') ||
@@ -159,31 +238,89 @@ export class AppDiscoveryEngine {
       packageName.includes('anki') ||
       packageName.includes('notion') ||
       packageName.includes('evernote') ||
+      packageName.includes('yinxiang') ||
+      packageName.includes('moji') ||
+      packageName.includes('bear') ||
+      packageName.includes('flomo') ||
+      packageName.includes('wiz') ||
+      packageName.includes('knowledge') ||
+      packageName.includes('course') ||
+      packageName.includes('tutor') ||
+      packageName.includes('dictionary') ||
+      packageName.includes('word') ||
+      packageName.includes('quiz') ||
+      packageName.includes('flashcard') ||
+      packageName.includes('yd') || // 有道
+      packageName.includes('lesson') ||
+      packageName.includes('homework') ||
       appName.includes('学习') ||
       appName.includes('教育') ||
-      appName.includes('笔记')
+      appName.includes('笔记') ||
+      appName.includes('墨墨') ||
+      appName.includes('notion') ||
+      appName.includes('anki') ||
+      appName.includes('flomo') ||
+      appName.includes('为知') ||
+      appName.includes('印象笔记') ||
+      appName.includes('有道') ||
+      appName.includes('百词斩') ||
+      appName.includes('扇贝') ||
+      appName.includes('可可') ||
+      appName.includes('作业帮') ||
+      appName.includes('小猿') ||
+      appName.includes('题霸') ||
+      appName.includes('单词') ||
+      appName.includes('背单词') ||
+      appName.includes('课程') ||
+      appName.includes('网课')
     ) {
       return 'STUDY_APP';
     }
 
-    // 智能家居
+    // 智能家居 - 扩展关键词
     if (
       packageName.includes('smarthome') ||
       packageName.includes('xiaomi.smarthome') ||
       packageName.includes('huawei.smarthome') ||
       packageName.includes('homekit') ||
+      packageName.includes('tuya') ||
+      packageName.includes('yeelight') ||
+      packageName.includes('miot') ||
+      packageName.includes('ijia') ||
+      packageName.includes('orvibo') ||
+      packageName.includes('aqara') ||
       appName.includes('智能家居') ||
       appName.includes('米家') ||
-      appName.includes('小米智能')
+      appName.includes('小米智能') ||
+      appName.includes('涂鸦') ||
+      appName.includes('yeelight') ||
+      appName.includes('绿米') ||
+      appName.includes('欧瑞博')
     ) {
       return 'SMART_HOME';
     }
 
-    // 日历
+    // 日历 - 扩展关键词，增加中国日历应用
     if (
       packageName.includes('calendar') ||
+      packageName.includes('calendars') ||
+      packageName.includes('schedule') ||
+      packageName.includes('agenda') ||
+      packageName.includes('qcalendar') || // 腾讯日历
+      packageName.includes('miui') && appName.includes('日历') || // 小米日历
+      packageName.includes('hw') && packageName.includes('calendar') || // 华为日历
+      packageName.includes('coloros') && packageName.includes('calendar') || // OPPO日历
+      packageName.includes('flyme') && packageName.includes('calendar') || // 魅族日历
+      packageName.includes('vivo') && packageName.includes('calendar') || // vivo日历
+      packageName.includes('time') || // 黄历类应用
+      packageName.includes('almanac') ||
       appName.includes('日历') ||
-      appName.includes('calendar')
+      appName.includes('calendar') ||
+      appName.includes('日程') ||
+      appName.includes('时间') ||
+      appName.includes('黄历') ||
+      appName.includes('万年历') ||
+      appName.includes('闹钟')
     ) {
       return 'CALENDAR';
     }
@@ -341,6 +478,97 @@ export class AppDiscoveryEngine {
       topApps: packageNames,
       lastUpdated: Date.now(),
     });
+  }
+
+  /**
+   * 在分类结果缺失时，用已安装应用中的“已知包名列表”填充默认 Top1
+   */
+  private fillMissingCategoriesWithFallbacks(installed: AppInfo[]): void {
+    const installedSet = new Set(installed.map(a => a.packageName));
+    const categories: AppCategory[] = ['MUSIC_PLAYER', 'TRANSIT_APP', 'MEETING_APP', 'STUDY_APP', 'SMART_HOME', 'CALENDAR', 'PAYMENT_APP'];
+
+    for (const cat of categories) {
+      const pref = this.preferences.get(cat);
+      if (pref && pref.topApps.length > 0) continue;
+
+      const candidates = this.fallbackCandidates[cat] || [];
+      const foundInstalled = candidates.find(pkg => installedSet.has(pkg));
+
+      // 优先使用已安装的候选；若没有，也用第一个兜底包名填充，至少让 UI 可选
+      const chosen = foundInstalled ?? candidates[0];
+      if (chosen) {
+        console.log(`[AppDiscoveryEngine] Fallback set for ${cat}: ${chosen}${foundInstalled ? ' (installed)' : ' (not installed)'}`);
+        this.preferences.set(cat, {
+          category: cat,
+          topApps: [chosen],
+          lastUpdated: Date.now(),
+        });
+      }
+    }
+  }
+
+  /**
+   * 当原生扫描返回空结果时使用的兜底应用数据，便于场景配置页展示
+   */
+  private getFallbackApps(): AppInfo[] {
+    return [
+      {
+        packageName: 'com.eg.android.AlipayGphone',
+        appName: '支付宝·乘车码',
+        category: 'TRANSIT_APP',
+        icon: '',
+        isSystemApp: false,
+      },
+      {
+        packageName: 'com.autonavi.minimap',
+        appName: '高德地图',
+        category: 'TRANSIT_APP',
+        icon: '',
+        isSystemApp: false,
+      },
+      {
+        packageName: 'com.netease.cloudmusic',
+        appName: '网易云音乐',
+        category: 'MUSIC_PLAYER',
+        icon: '',
+        isSystemApp: false,
+      },
+      {
+        packageName: 'com.tencent.wework',
+        appName: '企业微信',
+        category: 'MEETING_APP',
+        icon: '',
+        isSystemApp: false,
+      },
+      {
+        packageName: 'com.microsoft.teams',
+        appName: 'Microsoft Teams',
+        category: 'MEETING_APP',
+        icon: '',
+        isSystemApp: false,
+      },
+      {
+        packageName: 'com.xiaomi.smarthome',
+        appName: '米家',
+        category: 'SMART_HOME',
+        icon: '',
+        isSystemApp: false,
+      },
+      {
+        packageName: 'com.android.calendar',
+        appName: '系统日历',
+        category: 'CALENDAR',
+        icon: '',
+        isSystemApp: false,
+      },
+      {
+        packageName: 'com.duolingo',
+        appName: '多邻国',
+        category: 'STUDY_APP',
+        icon: '',
+        isSystemApp: false,
+      },
+    ];
   }
 }
 

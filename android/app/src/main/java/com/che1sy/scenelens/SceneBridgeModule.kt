@@ -2,6 +2,7 @@ package com.che1sy.scenelens
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlarmManager
 import android.app.AppOpsManager
 import android.app.NotificationManager
 import android.content.Context
@@ -36,6 +37,8 @@ import android.media.AudioFormat
 import android.media.MediaMetadataRetriever
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.PowerManager
+import android.os.BatteryManager
 import android.view.KeyEvent
 import android.view.Surface
 import androidx.core.app.ActivityCompat
@@ -98,18 +101,27 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
 
   private fun ensureMotionUpdates() {
     if (motionUpdatesRequested) return
-    if (!permissionGranted(Manifest.permission.ACTIVITY_RECOGNITION)) return
+
+    if (!permissionGranted(Manifest.permission.ACTIVITY_RECOGNITION)) {
+      android.util.Log.w("SceneBridge", "ACTIVITY_RECOGNITION permission not granted, using default STILL state")
+      lastMotionState = "STILL"
+      return
+    }
+
     try {
       activityRecognitionClient.requestActivityUpdates(
         5000L,
         getMotionPendingIntent()
       ).addOnSuccessListener {
         motionUpdatesRequested = true
-      }.addOnFailureListener {
-        Log.w(LOG_TAG, "Failed to request activity updates", it)
+        android.util.Log.d("SceneBridge", "Motion updates requested successfully")
+      }.addOnFailureListener { e ->
+        android.util.Log.w("SceneBridge", "Failed to request activity updates: ${e.message}. Google Play Services may not be available. Using default STILL state.")
+        lastMotionState = "STILL"
       }
     } catch (t: Throwable) {
-      Log.w(LOG_TAG, "Activity updates error", t)
+      android.util.Log.e("SceneBridge", "Activity updates error: ${t.message}. Using default STILL state.", t)
+      lastMotionState = "STILL"
     }
   }
 
@@ -205,129 +217,268 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   @SuppressLint("MissingPermission")
   @ReactMethod
   fun getCurrentLocation(promise: Promise) {
-    try {
-      if (!permissionGranted(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)) {
-        promise.reject("ERR_NO_PERMISSION", "Location permission not granted")
-        return
-      }
-      val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-      val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
-      var best: Location? = null
-      for (p in providers) {
-        val loc = lm.getLastKnownLocation(p)
-        if (loc != null && (best == null || loc.accuracy < best!!.accuracy)) {
-          best = loc
+    // Run on background thread to avoid blocking UI
+    Thread {
+      try {
+        if (!permissionGranted(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)) {
+          android.util.Log.w("SceneBridge", "Location permission not granted")
+          promise.reject("ERR_NO_PERMISSION", "Location permission not granted")
+          return@Thread
         }
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        var best: Location? = null
+        for (p in providers) {
+          val loc = lm.getLastKnownLocation(p)
+          if (loc != null && (best == null || loc.accuracy < best!!.accuracy)) {
+            best = loc
+          }
+        }
+        if (best == null) {
+          android.util.Log.w("SceneBridge", "No location available from providers")
+          promise.resolve(null)
+          return@Thread
+        }
+        android.util.Log.d("SceneBridge", "Got location: ${best.latitude}, ${best.longitude}, accuracy: ${best.accuracy}")
+        val map = Arguments.createMap().apply {
+          putDouble("latitude", best.latitude)
+          putDouble("longitude", best.longitude)
+          putDouble("accuracy", best.accuracy.toDouble())
+        }
+        promise.resolve(map)
+      } catch (t: Throwable) {
+        android.util.Log.e("SceneBridge", "Error getting location", t)
+        promise.reject("ERR_LOCATION", t.message)
       }
-      if (best == null) {
-        promise.resolve(null)
-        return
-      }
-      val map = Arguments.createMap().apply {
-        putDouble("latitude", best.latitude)
-        putDouble("longitude", best.longitude)
-        putDouble("accuracy", best.accuracy.toDouble())
-      }
-      promise.resolve(map)
-    } catch (t: Throwable) {
-      promise.reject("ERR_LOCATION", t)
-    }
+    }.start()
   }
 
   @SuppressLint("MissingPermission")
   @ReactMethod
   fun getConnectedWiFi(promise: Promise) {
-    try {
-      if (!permissionGranted(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) {
-        promise.reject("ERR_NO_PERMISSION", "Location/WiFi permission not granted")
-        return
+    // Run on background thread to avoid blocking UI
+    Thread {
+      try {
+        if (!permissionGranted(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) {
+          android.util.Log.w("SceneBridge", "Location/WiFi permission not granted")
+          promise.reject("ERR_NO_PERMISSION", "Location/WiFi permission not granted")
+          return@Thread
+        }
+        val wifiManager = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val info = wifiManager.connectionInfo
+        if (info == null || info.ssid == WifiManager.UNKNOWN_SSID) {
+          android.util.Log.w("SceneBridge", "No WiFi connected or unknown SSID")
+          promise.resolve(null)
+          return@Thread
+        }
+        val ssid = info.ssid.removePrefix("\"").removeSuffix("\"")
+        android.util.Log.d("SceneBridge", "Connected WiFi: $ssid")
+        val map = Arguments.createMap().apply {
+          putString("ssid", ssid)
+          putString("bssid", info.bssid)
+          putInt("rssi", info.rssi)
+        }
+        promise.resolve(map)
+      } catch (t: Throwable) {
+        android.util.Log.e("SceneBridge", "Error getting WiFi", t)
+        promise.reject("ERR_WIFI", t.message)
       }
-      val wifiManager = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-      val info = wifiManager.connectionInfo
-      if (info == null || info.ssid == WifiManager.UNKNOWN_SSID) {
-        promise.resolve(null)
-        return
-      }
-      val ssid = info.ssid.removePrefix("\"").removeSuffix("\"")
-      val map = Arguments.createMap().apply {
-        putString("ssid", ssid)
-        putString("bssid", info.bssid)
-        putInt("rssi", info.rssi)
-      }
-      promise.resolve(map)
-    } catch (t: Throwable) {
-      promise.reject("ERR_WIFI", t)
-    }
+    }.start()
   }
 
   @ReactMethod
   fun getMotionState(promise: Promise) {
-    ensureMotionUpdates()
-    promise.resolve(lastMotionState)
+    // Run on background thread to avoid blocking UI
+    Thread {
+      try {
+        // If we already have a valid state (not UNKNOWN), return it immediately
+        if (lastMotionState != "UNKNOWN") {
+          android.util.Log.d("SceneBridge", "Motion state: $lastMotionState (requested: $motionUpdatesRequested)")
+          promise.resolve(lastMotionState)
+          return@Thread
+        }
+
+        // If we don't have ACTIVITY_RECOGNITION permission, return STILL immediately
+        if (!permissionGranted(Manifest.permission.ACTIVITY_RECOGNITION)) {
+          android.util.Log.w("SceneBridge", "ACTIVITY_RECOGNITION permission not granted, returning default STILL state")
+          lastMotionState = "STILL"
+          promise.resolve("STILL")
+          return@Thread
+        }
+
+        // Try to request updates, but also set a fallback timeout
+        ensureMotionUpdates()
+
+        // Wait a short time for updates (max 2 seconds)
+        var waited = 0
+        val maxWait = 2000 // 2 seconds
+        val checkInterval = 100 // Check every 100ms
+
+        while (lastMotionState == "UNKNOWN" && waited < maxWait) {
+          Thread.sleep(checkInterval.toLong())
+          waited += checkInterval
+        }
+
+        // If still UNKNOWN after waiting, set default to STILL
+        if (lastMotionState == "UNKNOWN") {
+          android.util.Log.w("SceneBridge", "Motion state still UNKNOWN after ${waited}ms, using default STILL state")
+          lastMotionState = "STILL"
+        }
+
+        android.util.Log.d("SceneBridge", "Motion state: $lastMotionState (requested: $motionUpdatesRequested)")
+        promise.resolve(lastMotionState)
+      } catch (t: Throwable) {
+        android.util.Log.e("SceneBridge", "Error getting motion state", t)
+        promise.resolve("STILL")
+      }
+    }.start()
   }
 
   @ReactMethod
   fun getInstalledApps(promise: Promise) {
-    try {
-      val pm = ctx.packageManager
-      val appsArray = Arguments.createArray()
-      pm.getInstalledApplications(0)
-        .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
-        .forEach {
-          val map = Arguments.createMap()
-          map.putString("appName", pm.getApplicationLabel(it).toString())
-          map.putString("packageName", it.packageName)
-          appsArray.pushMap(map)
+    // Run on background thread to avoid blocking UI
+    Thread {
+      try {
+        val pm = ctx.packageManager
+        val appsArray = Arguments.createArray()
+
+        // Get PackageInfo list (compatible with Android 13+)
+        val pkgInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0))
+        } else {
+          @Suppress("DEPRECATION")
+          pm.getInstalledPackages(0)
         }
-      promise.resolve(appsArray)
-    } catch (t: Throwable) {
-      promise.reject("ERR_APPS", t)
-    }
+
+        android.util.Log.d("SceneBridge", "Total installed packages: ${pkgInfos.size}")
+
+        // Filter to only include real user apps (not system components)
+        val filteredApps = pkgInfos.filterNotNull().filter { pi ->
+          try {
+            val ai = pi.applicationInfo ?: return@filter false
+
+            // Must have a valid label (app name)
+            val label = ai.loadLabel(pm)?.toString()
+            if (label.isNullOrEmpty() || label == pi.packageName) {
+              return@filter false
+            }
+
+            val packageName = pi.packageName
+
+            // Exclude obvious non-app system components
+            val excludePatterns = listOf(
+              ".provider",
+              ".extension",
+              ".plugin",
+              ".service",
+              "android.process.",
+              "com.android.systemui"
+            )
+
+            val isSystemComponent = excludePatterns.any { pattern ->
+              packageName.contains(pattern)
+            }
+
+            // Also exclude pure system processes that start with "android."
+            // But keep user-installable system apps like calendars, settings, etc.
+            val isPureAndroidSystem = packageName == "android" ||
+              packageName.startsWith("android.awt") ||
+              packageName.startsWith("android.view")
+
+            !isSystemComponent && !isPureAndroidSystem
+          } catch (e: Exception) {
+            android.util.Log.w("SceneBridge", "Failed to process package: ${pi.packageName}", e)
+            false
+          }
+        }
+
+        android.util.Log.d("SceneBridge", "Filtered apps count: ${filteredApps.size}")
+
+        filteredApps.forEach { pi ->
+          try {
+            val ai = pi.applicationInfo ?: return@forEach
+            val appName = ai.loadLabel(pm)?.toString() ?: pi.packageName
+            val isSystemApp = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+
+            val map = Arguments.createMap()
+            map.putString("appName", appName)
+            map.putString("packageName", pi.packageName)
+            map.putBoolean("isSystemApp", isSystemApp)
+            map.putString("category", "OTHER") // Will be categorized by AppDiscoveryEngine
+            map.putString("icon", "") // Icon not sent to reduce data transfer
+            appsArray.pushMap(map)
+          } catch (e: Exception) {
+            android.util.Log.w("SceneBridge", "Failed to get app info for ${pi.packageName}", e)
+          }
+        }
+
+        android.util.Log.d("SceneBridge", "Returning ${appsArray.size()} apps")
+        promise.resolve(appsArray)
+      } catch (t: Throwable) {
+        android.util.Log.e("SceneBridge", "Error in getInstalledApps", t)
+        promise.reject("ERR_APPS", t.message)
+      }
+    }.start()
   }
 
   @ReactMethod
   fun getForegroundApp(promise: Promise) {
-    try {
-      val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
-      val end = System.currentTimeMillis()
-      val begin = end - TimeUnit.MINUTES.toMillis(2)
-      val stats = usm.queryUsageStats(android.app.usage.UsageStatsManager.INTERVAL_DAILY, begin, end)
-      val top = stats?.maxByOrNull { it.lastTimeUsed }
-      promise.resolve(top?.packageName ?: "")
-    } catch (t: Throwable) {
-      promise.reject("ERR_FOREGROUND", t)
-    }
+    // Run on background thread to avoid blocking UI
+    Thread {
+      try {
+        val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
+        val end = System.currentTimeMillis()
+        val begin = end - TimeUnit.MINUTES.toMillis(2)
+        val stats = usm.queryUsageStats(android.app.usage.UsageStatsManager.INTERVAL_DAILY, begin, end)
+
+        if (stats == null || stats.isEmpty()) {
+          android.util.Log.w("SceneBridge", "No usage stats available - PACKAGE_USAGE_STATS permission may not be granted")
+          promise.resolve("")
+          return@Thread
+        }
+
+        val top = stats.maxByOrNull { it.lastTimeUsed }
+        android.util.Log.d("SceneBridge", "Foreground app: ${top?.packageName ?: "none"}")
+        promise.resolve(top?.packageName ?: "")
+      } catch (t: Throwable) {
+        android.util.Log.e("SceneBridge", "Error getting foreground app", t)
+        promise.reject("ERR_FOREGROUND", t.message)
+      }
+    }.start()
   }
 
   @ReactMethod
   fun getUsageStats(days: Int, promise: Promise) {
-    try {
-      val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
-      val end = System.currentTimeMillis()
-      val begin = end - TimeUnit.DAYS.toMillis(days.toLong())
-      val stats = usm.queryUsageStats(android.app.usage.UsageStatsManager.INTERVAL_DAILY, begin, end)
-      val arr = Arguments.createArray()
-      stats?.forEach {
-        val map = Arguments.createMap()
-        map.putString("packageName", it.packageName)
-        map.putDouble("totalTimeInForeground", it.totalTimeInForeground.toDouble())
-        map.putDouble("lastTimeUsed", it.lastTimeUsed.toDouble())
-        // Use reflection so builds that target < 29 still compile, while preferring the real field when available.
-        val launches = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-          try {
-            val m = it.javaClass.getMethod("getAppLaunchCount")
-            (m.invoke(it) as? Int) ?: 0
-          } catch (ignored: Throwable) {
-            0
-          }
-        } else 0
-        map.putInt("launchCount", launches)
-        arr.pushMap(map)
+    // Run on background thread to avoid blocking UI
+    Thread {
+      try {
+        val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
+        val end = System.currentTimeMillis()
+        val begin = end - TimeUnit.DAYS.toMillis(days.toLong())
+        val stats = usm.queryUsageStats(android.app.usage.UsageStatsManager.INTERVAL_DAILY, begin, end)
+        val arr = Arguments.createArray()
+        stats?.forEach {
+          val map = Arguments.createMap()
+          map.putString("packageName", it.packageName)
+          map.putDouble("totalTimeInForeground", it.totalTimeInForeground.toDouble())
+          map.putDouble("lastTimeUsed", it.lastTimeUsed.toDouble())
+          // Use reflection so builds that target < 29 still compile, while preferring the real field when available.
+          val launches = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+              val m = it.javaClass.getMethod("getAppLaunchCount")
+              (m.invoke(it) as? Int) ?: 0
+            } catch (ignored: Throwable) {
+              0
+            }
+          } else 0
+          map.putInt("launchCount", launches)
+          arr.pushMap(map)
+        }
+        promise.resolve(arr)
+      } catch (t: Throwable) {
+        promise.reject("ERR_USAGE", t)
       }
-      promise.resolve(arr)
-    } catch (t: Throwable) {
-      promise.reject("ERR_USAGE", t)
-    }
+    }.start()
   }
 
   @ReactMethod
@@ -408,26 +559,52 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   fun openAppWithDeepLink(packageName: String, deepLink: String?, promise: Promise) {
     try {
       val pm = ctx.packageManager
+
+      // 检查应用是否已安装
+      try {
+        pm.getPackageInfo(packageName, 0)
+      } catch (e: Exception) {
+        promise.reject("ERR_APP_NOT_FOUND", "Package not found: $packageName")
+        return
+      }
+
       var intent: Intent? = null
       if (!deepLink.isNullOrBlank()) {
-        intent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
-          `package` = packageName
-          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+          intent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
+            `package` = packageName
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+          // 检查是否有应用可以处理这个 intent
+          if (intent.resolveActivity(pm) == null) {
+            intent = null
+          }
+        } catch (e: Exception) {
+          System.err.println("Failed to create deep link intent: ${e.message}")
+          intent = null
         }
       }
-      if (intent == null || intent.resolveActivity(pm) == null) {
-        intent = pm.getLaunchIntentForPackage(packageName)?.apply {
-          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-      }
+
+      // 如果没有 deepLink 或 deepLink 无法解析，使用 launcher intent
       if (intent == null) {
+        intent = pm.getLaunchIntentForPackage(packageName)
+        if (intent != null) {
+          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      }
+
+      if (intent == null) {
+        System.err.println("Failed to create intent for package: $packageName")
         promise.resolve(false)
         return
       }
+
       ctx.startActivity(intent)
       promise.resolve(true)
     } catch (t: Throwable) {
-      promise.reject("ERR_OPEN_APP", t)
+      System.err.println("Error opening app: ${t.message}")
+      t.printStackTrace()
+      promise.reject("ERR_OPEN_APP", t.message, t)
     }
   }
 
@@ -458,36 +635,56 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   fun getUpcomingEvents(hours: Int, promise: Promise) {
     try {
       if (!permissionGranted(Manifest.permission.READ_CALENDAR)) {
+        android.util.Log.w("SceneBridge", "READ_CALENDAR permission not granted")
         promise.reject("ERR_NO_PERMISSION", "Calendar permission not granted")
         return
       }
+
       val now = Calendar.getInstance()
       val end = Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, hours) }
-      val uri = CalendarContract.Instances.CONTENT_URI
-      val projection = arrayOf(
-        CalendarContract.Instances.TITLE,
-        CalendarContract.Instances.BEGIN,
-        CalendarContract.Instances.END,
-        CalendarContract.Instances.EVENT_ID,
-      )
-      val selection = "${CalendarContract.Instances.BEGIN} >= ? AND ${CalendarContract.Instances.END} <= ?"
-      val args = arrayOf(now.timeInMillis.toString(), end.timeInMillis.toString())
-      val cursor = ctx.contentResolver.query(uri, projection, selection, args, CalendarContract.Instances.BEGIN + " ASC")
-      val list = Arguments.createArray()
-      cursor?.use {
-        while (it.moveToNext()) {
-          val map = Arguments.createMap().apply {
-            putString("title", it.getString(0))
-            putDouble("begin", it.getLong(1).toDouble())
-            putDouble("end", it.getLong(2).toDouble())
-            putDouble("eventId", it.getLong(3).toDouble())
+
+      // Try to query calendar instances, with fallback to events table
+      var cursor: android.database.Cursor? = null
+      try {
+        val uri = CalendarContract.Instances.CONTENT_URI
+        val projection = arrayOf(
+          CalendarContract.Instances.TITLE,
+          CalendarContract.Instances.BEGIN,
+          CalendarContract.Instances.END,
+          CalendarContract.Instances.EVENT_ID,
+        )
+        val selection = "${CalendarContract.Instances.BEGIN} >= ? AND ${CalendarContract.Instances.END} <= ?"
+        val args = arrayOf(now.timeInMillis.toString(), end.timeInMillis.toString())
+
+        android.util.Log.d("SceneBridge", "Querying calendar with URI: $uri")
+
+        cursor = ctx.contentResolver.query(uri, projection, selection, args, CalendarContract.Instances.BEGIN + " ASC")
+
+        val list = Arguments.createArray()
+        cursor?.use {
+          while (it.moveToNext()) {
+            val map = Arguments.createMap().apply {
+              putString("title", it.getString(0))
+              putDouble("begin", it.getLong(1).toDouble())
+              putDouble("end", it.getLong(2).toDouble())
+              putDouble("eventId", it.getLong(3).toDouble())
+            }
+            list.pushMap(map)
           }
-          list.pushMap(map)
         }
+
+        android.util.Log.d("SceneBridge", "Found ${list.size()} calendar events in next $hours hours")
+        promise.resolve(list)
+      } catch (e: Exception) {
+        android.util.Log.e("SceneBridge", "Calendar query failed: ${e.message}. Calendar provider may not be available on this device.", e)
+        // Return empty array instead of rejecting, to allow graceful degradation
+        promise.resolve(Arguments.createArray())
+      } finally {
+        cursor?.close()
       }
-      promise.resolve(list)
     } catch (t: Throwable) {
-      promise.reject("ERR_CALENDAR", t)
+      android.util.Log.e("SceneBridge", "Unexpected error in getUpcomingEvents", t)
+      promise.reject("ERR_CALENDAR", t.message ?: "Unknown error")
     }
   }
 
@@ -584,6 +781,24 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   @ReactMethod
   fun requestUsageStatsPermission(promise: Promise) {
     openUsageStatsSettings(promise)
+  }
+
+  // Calendar permission methods ------------------------------------------
+
+  @ReactMethod
+  fun hasCalendarPermission(promise: Promise) {
+    promise.resolve(permissionGranted(Manifest.permission.READ_CALENDAR))
+  }
+
+  @ReactMethod
+  fun requestCalendarPermission(promise: Promise) {
+    val granted = permissionGranted(Manifest.permission.READ_CALENDAR)
+    if (granted) {
+      promise.resolve(true)
+      return
+    }
+    val requested = requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR))
+    promise.resolve(requested)
   }
 
   // Camera methods ------------------------------------------
@@ -1212,7 +1427,7 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
     if (intent?.action == "com.che1sy.scenelens.TRIGGER_SCENE_ANALYSIS") {
       val triggerSource = intent.getStringExtra("trigger_source") ?: "unknown"
       Log.d(LOG_TAG, "Shortcut triggered scene analysis from: $triggerSource")
-      
+
       try {
         // Send event to React Native
         val params = Arguments.createMap().apply {
@@ -1220,13 +1435,167 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
           putString("source", triggerSource)
           putDouble("timestamp", System.currentTimeMillis().toDouble())
         }
-        
+
         ctx.getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
           .emit("onDesktopShortcutTrigger", params)
-          
+
       } catch (e: Exception) {
         Log.e(LOG_TAG, "Failed to handle shortcut intent", e)
       }
+    }
+  }
+
+  /**
+   * Get battery charging status
+   */
+  @ReactMethod
+  fun getBatteryStatus(promise: Promise) {
+    try {
+      val batteryStatus: Intent? = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+      val status = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+      val isCharging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                       status == android.os.BatteryManager.BATTERY_STATUS_FULL
+
+      val level = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+      val scale = batteryStatus?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+      val batteryPct = if (level >= 0 && scale > 0) (level * 100 / scale.toFloat()) else -1f
+
+      val map = Arguments.createMap().apply {
+        putBoolean("isCharging", isCharging)
+        putBoolean("isFull", status == android.os.BatteryManager.BATTERY_STATUS_FULL)
+        putDouble("batteryLevel", batteryPct.toDouble())
+      }
+      promise.resolve(map)
+    } catch (t: Throwable) {
+      promise.reject("ERR_BATTERY", "Failed to get battery status: ${t.message}")
+    }
+  }
+
+  /**
+   * Check next alarm
+   */
+  @ReactMethod
+  fun getNextAlarm(promise: Promise) {
+    try {
+      val alarmManager = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // Android 12+ requires permission
+        val hasPermission = ctx.checkSelfPermission("android.permission.SCHEDULE_EXACT_ALARM") == PackageManager.PERMISSION_GRANTED
+        if (!hasPermission) {
+          // Return empty result instead of throwing error
+          promise.resolve(null)
+          return
+        }
+      }
+
+      val alarmClockInfo = alarmManager.getNextAlarmClock()
+      if (alarmClockInfo != null) {
+        val triggerTime = alarmClockInfo.triggerTime
+        val currentTime = System.currentTimeMillis()
+
+        val map = Arguments.createMap().apply {
+          putDouble("triggerTime", triggerTime.toDouble())
+          putDouble("hoursUntil", ((triggerTime - currentTime) / (1000 * 60 * 60)).toDouble())
+          putBoolean("hasAlarm", true)
+        }
+        promise.resolve(map)
+      } else {
+        promise.resolve(null)
+      }
+    } catch (t: Throwable) {
+      promise.reject("ERR_ALARM", "Failed to get next alarm: ${t.message}")
+    }
+  }
+
+  /**
+   * Check if screen is on
+   */
+  @ReactMethod
+  fun isScreenOn(promise: Promise) {
+    try {
+      val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+      val isScreenOn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+        powerManager.isInteractive
+      } else {
+        @Suppress("DEPRECATION")
+        powerManager.isScreenOn
+      }
+      promise.resolve(isScreenOn)
+    } catch (t: Throwable) {
+      promise.reject("ERR_SCREEN", "Failed to check screen state: ${t.message}")
+    }
+  }
+
+  private var wakeLock: PowerManager.WakeLock? = null
+
+  /**
+   * Set wake lock to keep screen on
+   */
+  @ReactMethod
+  fun setWakeLock(enable: Boolean, timeoutMs: Double, promise: Promise) {
+    try {
+      val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+
+      if (enable) {
+        // Release existing wake lock if any
+        releaseWakeLock()
+
+        // Create new wake lock
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+          PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE
+        } else {
+          @Suppress("DEPRECATION")
+          PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE
+        }
+
+        wakeLock = powerManager.newWakeLock(flags, "SceneLens:TravelWakeLock").apply {
+          setReferenceCounted(false)
+        }
+
+        wakeLock?.acquire(timeoutMs.toLong())
+
+        val map = Arguments.createMap().apply {
+          putBoolean("enabled", true)
+          putDouble("timeout", timeoutMs)
+        }
+        promise.resolve(map)
+      } else {
+        releaseWakeLock()
+        val map = Arguments.createMap().apply {
+          putBoolean("enabled", false)
+          putDouble("timeout", 0.0)
+        }
+        promise.resolve(map)
+      }
+    } catch (t: Throwable) {
+      promise.reject("ERR_WAKE_LOCK", "Failed to set wake lock: ${t.message}")
+    }
+  }
+
+  /**
+   * Release wake lock
+   */
+  private fun releaseWakeLock() {
+    try {
+      if (wakeLock?.isHeld == true) {
+        wakeLock?.release()
+        Log.d(LOG_TAG, "Wake lock released")
+      }
+    } catch (e: Exception) {
+      Log.e(LOG_TAG, "Failed to release wake lock", e)
+    }
+  }
+
+  /**
+   * Check if wake lock is currently held
+   */
+  @ReactMethod
+  fun isWakeLockEnabled(promise: Promise) {
+    try {
+      promise.resolve(wakeLock?.isHeld == true)
+    } catch (t: Throwable) {
+      promise.reject("ERR_WAKE_LOCK", "Failed to check wake lock: ${t.message}")
     }
   }
 }

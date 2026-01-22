@@ -1,0 +1,489 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2025-01-22",
+  "description": "场景执行建议包配置 - 用于 UI 展示和用户交互",
+  "scenes": [
+    {
+      "sceneId": "COMMUTE",
+      "displayName": "通勤",
+      "icon": "subway",
+      "color": "#3B82F6",
+      "detectionHighlights": [
+        "早晚高峰时段（7-9点/17-19点）",
+        "靠近地铁站或处于步行/乘车状态"
+      ],
+      "systemAdjustments": [
+        {
+          "id": "dnd_emergency",
+          "label": "开启勿扰模式",
+          "description": "允许紧急联系人来电",
+          "action": "setDoNotDisturb",
+          "params": {
+            "enable": true,
+            "allowCalls": true,
+            "whitelist": ["emergency_contacts"]
+          }
+        }
+      ],
+      "appLaunches": [
+        {
+          "id": "transit_qr",
+          "label": "乘车码应用",
+          "description": "支付宝乘车码",
+          "intent": "TRANSIT_APP_TOP1",
+          "action": "open_ticket_qr",
+          "deepLink": "alipays://platformapi/startapp?appId=200011235",
+          "fallbackAction": "打开首页"
+        },
+        {
+          "id": "music_playlist",
+          "label": "音乐应用",
+          "description": "启动通勤歌单",
+          "intent": "MUSIC_PLAYER_TOP1",
+          "action": "launch_with_playlist",
+          "params": {
+            "playlist": "commute"
+          },
+          "fallbackAction": "打开播放器"
+        }
+      ],
+      "oneTapActions": [
+        {
+          "id": "execute",
+          "label": "开始通勤",
+          "description": "开启勿扰+乘车码+音乐",
+          "type": "primary",
+          "action": "execute_all"
+        },
+        {
+          "id": "skip",
+          "label": "本次跳过",
+          "description": "不执行任何操作",
+          "type": "secondary",
+          "action": "dismiss"
+        }
+      ],
+      "fallbackNotes": [
+        {
+          "condition": "no_dnd_permission",
+          "message": "未授予勿扰权限时仅打开应用",
+          "action": "skip_system_settings"
+        },
+        {
+          "condition": "no_transit_app",
+          "message": "未检测到乘车码应用时提供下载建议",
+          "action": "suggest_download"
+        }
+      ]
+    },
+    {
+      "sceneId": "HOME",
+      "displayName": "到家",
+      "icon": "home",
+      "color": "#10B981",
+      "detectionHighlights": [
+        "位于家庭地理围栏内",
+        "连接家庭 Wi-Fi 网络"
+      ],
+      "systemAdjustments": [
+        {
+          "id": "dnd_disable",
+          "label": "关闭勿扰模式",
+          "description": "恢复正常通知",
+          "action": "setDoNotDisturb",
+          "params": {
+            "enable": false
+          }
+        },
+        {
+          "id": "brightness_comfort",
+          "label": "调整屏幕亮度",
+          "description": "设置至 70%（舒适模式）",
+          "action": "setBrightness",
+          "params": {
+            "level": 0.7
+          }
+        }
+      ],
+      "appLaunches": [
+        {
+          "id": "smart_home",
+          "label": "智能家居应用",
+          "description": "启动家庭模式",
+          "intent": "SMART_HOME_TOP1",
+          "action": "launch",
+          "params": {
+            "mode": "home"
+          },
+          "fallbackAction": "打开首页"
+        }
+      ],
+      "oneTapActions": [
+        {
+          "id": "execute",
+          "label": "欢迎回家",
+          "description": "关闭勿扰+调亮屏幕+智能家居",
+          "type": "primary",
+          "action": "execute_all"
+        },
+        {
+          "id": "later",
+          "label": "稍后提醒",
+          "description": "15 分钟后再次提醒",
+          "type": "secondary",
+          "action": "snooze",
+          "params": {
+            "delayMs": 900000
+          }
+        }
+      ],
+      "fallbackNotes": [
+        {
+          "condition": "no_smart_home_app",
+          "message": "未安装智能家居应用时跳过",
+          "action": "skip_app_launch"
+        },
+        {
+          "condition": "no_settings_permission",
+          "message": "未授予系统设置权限时仅关闭勿扰",
+          "action": "skip_brightness_adjust"
+        }
+      ]
+    },
+    {
+      "sceneId": "MEETING",
+      "displayName": "会议",
+      "icon": "calendar",
+      "color": "#8B5CF6",
+      "detectionHighlights": [
+        "工作时间位于办公室",
+        "日历显示 1 小时内有会议安排"
+      ],
+      "systemAdjustments": [
+        {
+          "id": "dnd_meeting",
+          "label": "开启会议勿扰",
+          "description": "允许重要联系人和会议应用",
+          "action": "setDoNotDisturb",
+          "params": {
+            "enable": true,
+            "allowCalls": true,
+            "allowImportantInterruptions": true,
+            "whitelist": ["work_contacts", "meeting_apps"]
+          }
+        },
+        {
+          "id": "wake_lock_meeting",
+          "label": "屏幕常亮",
+          "description": "保持屏幕常亮 5 分钟",
+          "action": "setWakeLock",
+          "params": {
+            "enable": true,
+            "timeout": 300000
+          }
+        }
+      ],
+      "appLaunches": [
+        {
+          "id": "calendar",
+          "label": "日历应用",
+          "description": "查看会议详情",
+          "intent": "CALENDAR_TOP1",
+          "action": "open_meeting_details",
+          "deepLink": "content://com.android.calendar/events",
+          "fallbackAction": "打开日历"
+        },
+        {
+          "id": "meeting_app",
+          "label": "会议应用",
+          "description": "准备会议（不自动加入）",
+          "intent": "MEETING_APP_TOP1",
+          "action": "launch_meeting",
+          "params": {
+            "autoJoin": false
+          },
+          "fallbackAction": "打开首页"
+        }
+      ],
+      "oneTapActions": [
+        {
+          "id": "execute",
+          "label": "会议模式",
+          "description": "勿扰+日历+会议应用",
+          "type": "primary",
+          "action": "execute_all"
+        },
+        {
+          "id": "snooze",
+          "label": "稍后准备",
+          "description": "会议前 5 分钟再次提醒",
+          "type": "secondary",
+          "action": "snooze",
+          "params": {
+            "delayMs": 300000
+          }
+        }
+      ],
+      "fallbackNotes": [
+        {
+          "condition": "no_calendar_permission",
+          "message": "未授予日历权限时无法读取会议信息",
+          "action": "request_calendar_permission"
+        },
+        {
+          "condition": "no_meeting_app",
+          "message": "未安装会议应用时仅打开日历",
+          "action": "skip_meeting_app"
+        }
+      ]
+    },
+    {
+      "sceneId": "OFFICE",
+      "displayName": "办公",
+      "icon": "briefcase",
+      "color": "#6366F1",
+      "detectionHighlights": [
+        "工作日时段位于办公室",
+        "处于静止或轻微活动状态"
+      ],
+      "systemAdjustments": [
+        {
+          "id": "brightness_office",
+          "label": "调整屏幕亮度",
+          "description": "设置至 80%（办公环境）",
+          "action": "setBrightness",
+          "params": {
+            "level": 0.8
+          }
+        }
+      ],
+      "appLaunches": [
+        {
+          "id": "calendar",
+          "label": "日历应用",
+          "description": "查看今日日程",
+          "intent": "CALENDAR_TOP1",
+          "action": "open_events",
+          "deepLink": "content://com.android.calendar/events",
+          "fallbackAction": "打开日历"
+        }
+      ],
+      "oneTapActions": [
+        {
+          "id": "execute",
+          "label": "进入办公",
+          "description": "调亮屏幕+打开日历",
+          "type": "primary",
+          "action": "execute_all"
+        },
+        {
+          "id": "dismiss",
+          "label": "无需调整",
+          "description": "保持当前状态",
+          "type": "secondary",
+          "action": "dismiss"
+        }
+      ],
+      "fallbackNotes": [
+        {
+          "condition": "no_settings_permission",
+          "message": "未授予系统设置权限时仅打开日历",
+          "action": "skip_brightness_adjust"
+        },
+        {
+          "condition": "no_calendar_permission",
+          "message": "未授予日历权限时仅显示建议",
+          "action": "show_suggestion_only"
+        }
+      ]
+    },
+    {
+      "sceneId": "STUDY",
+      "displayName": "专注学习",
+      "icon": "book",
+      "color": "#F59E0B",
+      "detectionHighlights": [
+        "晚间时段（19-23 点）",
+        "位于家中或图书馆，静止状态"
+      ],
+      "systemAdjustments": [
+        {
+          "id": "dnd_focus",
+          "label": "开启专注勿扰",
+          "description": "屏蔽所有通知和来电",
+          "action": "setDoNotDisturb",
+          "params": {
+            "enable": true,
+            "allowCalls": false,
+            "allowImportantInterruptions": false
+          }
+        }
+      ],
+      "appLaunches": [
+        {
+          "id": "focus_music",
+          "label": "音乐应用",
+          "description": "启动专注歌单（自动播放）",
+          "intent": "MUSIC_PLAYER_TOP1",
+          "action": "launch_with_playlist",
+          "params": {
+            "playlist": "focus",
+            "autoPlay": true
+          },
+          "fallbackAction": "打开播放器"
+        }
+      ],
+      "oneTapActions": [
+        {
+          "id": "execute",
+          "label": "开始专注",
+          "description": "开启勿扰+白噪音",
+          "type": "primary",
+          "action": "execute_all"
+        },
+        {
+          "id": "later",
+          "label": "稍后再说",
+          "description": "30 分钟后再次提醒",
+          "type": "secondary",
+          "action": "snooze",
+          "params": {
+            "delayMs": 1800000
+          }
+        }
+      ],
+      "fallbackNotes": [
+        {
+          "condition": "no_dnd_permission",
+          "message": "未授予勿扰权限时仅播放白噪音",
+          "action": "skip_system_settings"
+        },
+        {
+          "condition": "no_music_app",
+          "message": "未检测到音乐应用时建议安装",
+          "action": "suggest_download"
+        }
+      ]
+    },
+    {
+      "sceneId": "SLEEP",
+      "displayName": "睡前",
+      "icon": "moon",
+      "color": "#6366F1",
+      "detectionHighlights": [
+        "深夜时段（23 点后）",
+        "设备充电中且屏幕关闭"
+      ],
+      "systemAdjustments": [
+        {
+          "id": "dnd_sleep",
+          "label": "开启睡眠勿扰",
+          "description": "仅允许闹钟",
+          "action": "setDoNotDisturb",
+          "params": {
+            "enable": true,
+            "allowCalls": false,
+            "allowAlarms": true,
+            "whitelist": []
+          }
+        }
+      ],
+      "appLaunches": [],
+      "oneTapActions": [
+        {
+          "id": "confirm",
+          "label": "晚安",
+          "description": "确认已开启睡眠勿扰",
+          "type": "primary",
+          "action": "dismiss"
+        }
+      ],
+      "fallbackNotes": [
+        {
+          "condition": "no_dnd_permission",
+          "message": "未授予勿扰权限时显示建议提示",
+          "action": "show_suggestion_only"
+        },
+        {
+          "condition": "no_alarm_set",
+          "message": "未设置闹钟时提醒用户设置",
+          "action": "suggest_set_alarm"
+        }
+      ]
+    },
+    {
+      "sceneId": "TRAVEL",
+      "displayName": "出行",
+      "icon": "airplane",
+      "color": "#EC4899",
+      "detectionHighlights": [
+        "位于火车站或机场附近",
+        "日历中有出行事件或使用出行应用"
+      ],
+      "systemAdjustments": [
+        {
+          "id": "dnd_travel",
+          "label": "开启出行勿扰",
+          "description": "允许紧急联系人来电",
+          "action": "setDoNotDisturb",
+          "params": {
+            "enable": true,
+            "allowCalls": true,
+            "whitelist": ["emergency_contacts"]
+          }
+        },
+        {
+          "id": "wake_lock_travel",
+          "label": "屏幕常亮",
+          "description": "保持屏幕常亮 5 分钟方便查看行程",
+          "action": "setWakeLock",
+          "params": {
+            "enable": true,
+            "timeout": 300000
+          }
+        }
+      ],
+      "appLaunches": [
+        {
+          "id": "travel_app",
+          "label": "出行应用",
+          "description": "12306/航司应用",
+          "intent": "TRAVEL_APP_TOP1",
+          "action": "launch_ticket_qr",
+          "params": {
+            "autoLogin": true
+          },
+          "fallbackAction": "打开首页"
+        }
+      ],
+      "oneTapActions": [
+        {
+          "id": "execute",
+          "label": "出行准备",
+          "description": "勿扰+屏幕常亮+出行码",
+          "type": "primary",
+          "action": "execute_all"
+        },
+        {
+          "id": "manual",
+          "label": "手动处理",
+          "description": "不执行自动操作",
+          "type": "secondary",
+          "action": "dismiss"
+        }
+      ],
+      "fallbackNotes": [
+        {
+          "condition": "no_travel_app",
+          "message": "未检测到出行应用时提供下载建议",
+          "action": "suggest_download"
+        },
+        {
+          "condition": "no_settings_permission",
+          "message": "未授予系统权限时仅显示提醒",
+          "action": "show_suggestion_only"
+        }
+      ]
+    }
+  ]
+}
