@@ -5,6 +5,7 @@
  * 使用相机和麦克风进行精确场景识别
  */
 
+import { DeviceEventEmitter } from 'react-native';
 import { sceneBridge } from './SceneBridge';
 import { ModelRunner } from '../ml/ModelRunner';
 import { VolumeKeyListener, VolumeKeyEvent } from './VolumeKeyListener';
@@ -50,6 +51,17 @@ export class UserTriggeredAnalyzer {
     this.modelRunner = new ModelRunner();
     this.volumeKeyListener = new VolumeKeyListener();
     this.shortcutManager = new ShortcutManager();
+  }
+
+  /**
+   * 发送分析结果事件，供前端页面订阅（用于音量键/快捷方式背景触发时展示 UI）
+   */
+  private emitAnalysisResult(result: TriggeredContext) {
+    DeviceEventEmitter.emit('UserTriggeredAnalysisResult', { ok: true, result });
+  }
+
+  private emitAnalysisError(error: Error) {
+    DeviceEventEmitter.emit('UserTriggeredAnalysisResult', { ok: false, error: error.message });
   }
 
   /**
@@ -110,6 +122,9 @@ export class UserTriggeredAnalyzer {
         topPrediction: predictions[0]?.label,
       });
 
+      // 通知前端订阅者（例如 HomeScreen）
+      this.emitAnalysisResult(result);
+
       return result;
 
     } catch (error) {
@@ -126,6 +141,7 @@ export class UserTriggeredAnalyzer {
         });
       }
       
+      this.emitAnalysisError(error as Error);
       throw error;
     } finally {
       this._isAnalyzing = false;

@@ -8,6 +8,10 @@ const sleepRule = {
     { type: 'time', value: 'LATE_NIGHT', weight: 0.9 },
     { type: 'location', value: 'HOME', weight: 0.5 },
     { type: 'motion', value: 'STILL', weight: 0.3 },
+    // 新增：电池和屏幕状态条件
+    { type: 'battery', value: 'CHARGING', weight: 0.6 },
+    { type: 'battery', value: 'CHARGING_FULL', weight: 0.6 },
+    { type: 'screen', value: 'OFF', weight: 0.7 },
   ],
   actions: [
     {

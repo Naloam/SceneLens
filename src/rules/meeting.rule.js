@@ -11,6 +11,10 @@ const meetingRule = {
     { type: 'time', value: 'LUNCH_WEEKDAY', weight: 0.3 },
     { type: 'location', value: 'OFFICE', weight: 0.7 },
     { type: 'motion', value: 'STILL', weight: 0.3 },
+    // 新增：日历事件条件 - 即将开始的会议
+    { type: 'calendar', value: 'MEETING_IMMINENT', weight: 0.9 },
+    { type: 'calendar', value: 'MEETING_SOON', weight: 0.7 },
+    { type: 'calendar', value: 'MEETING_UPCOMING', weight: 0.5 },
   ],
   actions: [
     {

@@ -88,6 +88,39 @@ class StorageManagerClass {
     this.storage = new MMKVStorage();
   }
 
+  // ==================== 通用存储方法 ====================
+
+  /**
+   * 获取字符串值
+   */
+  getString(key: string): string | undefined {
+    return this.storage.getString(key);
+  }
+
+  /**
+   * 设置字符串值
+   */
+  set(key: string, value: string): void {
+    this.storage.set(key, value);
+  }
+
+  /**
+   * 删除指定键
+   */
+  delete(key: string): void {
+    // MMKV 没有 delete 方法，通过设置空值模拟
+    this.storage.set(key, '');
+  }
+
+  /**
+   * 清除所有存储
+   */
+  clearAll(): void {
+    this.storage.clearAll();
+  }
+
+  // ==================== 用户配置相关 ====================
+
   /**
    * 获取用户配置
    */

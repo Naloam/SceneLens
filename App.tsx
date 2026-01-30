@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -13,6 +13,7 @@ import {
   SettingsScreen,
 } from './src/screens';
 import LocationConfigScreen from './src/screens/LocationConfigScreen';
+import { backgroundService } from './src/background';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -48,6 +49,26 @@ const customTheme = {
 };
 
 export default function App() {
+  // 初始化后台服务
+  useEffect(() => {
+    const initBackgroundService = async () => {
+      try {
+        await backgroundService.initialize();
+        backgroundService.start();
+        console.log('[App] Background service started');
+      } catch (error) {
+        console.error('[App] Failed to initialize background service:', error);
+      }
+    };
+
+    initBackgroundService();
+
+    // 清理
+    return () => {
+      backgroundService.destroy();
+    };
+  }, []);
+
   return (
     <PaperProvider theme={customTheme}>
       <NavigationContainer>

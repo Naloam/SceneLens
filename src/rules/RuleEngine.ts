@@ -1,40 +1,29 @@
-import { SilentContext, SceneType } from '../types';
+import { 
+  SilentContext, 
+  SceneType, 
+  Rule, 
+  MatchedRule, 
+  Condition, 
+  Action,
+  ConditionType,
+  ActionTarget,
+  RulePriority,
+  RuleMode 
+} from '../types';
 import { ruleCache, SceneCacheKeyBuilder } from '../utils/cacheManager';
+import { weightAdjuster } from '../reflection/WeightAdjuster';
 
-// 规则引擎专用类型（简化版本，不包含 battery/screen 等扩展类型）
-export type RulePriority = 'LOW' | 'MEDIUM' | 'HIGH';
-export type RuleMode = 'SUGGEST_ONLY' | 'ONE_TAP' | 'AUTO';
-export type ConditionType = 'time' | 'location' | 'motion' | 'wifi' | 'app_usage' | 'calendar';
-export type ActionTarget = 'system' | 'app' | 'notification';
-
-export interface Condition {
-  type: ConditionType;
-  value: string;
-  weight: number;
-}
-
-export interface Action {
-  target: ActionTarget;
-  action: string;
-  intent?: string;
-  deepLink?: string;
-  params?: Record<string, any>;
-}
-
-export interface Rule {
-  id: string;
-  priority: RulePriority;
-  mode: RuleMode;
-  enabled: boolean;
-  conditions: Condition[];
-  actions: Action[];
-}
-
-export interface MatchedRule {
-  rule: Rule;
-  score: number;
-  explanation: string;
-}
+// 为了向后兼容，重新导出类型
+export type { 
+  RulePriority, 
+  RuleMode, 
+  ConditionType, 
+  ActionTarget, 
+  Condition, 
+  Action, 
+  Rule, 
+  MatchedRule 
+};
 
 /**
  * 规则引擎
@@ -224,6 +213,7 @@ export class RuleEngine {
   /**
    * 计算规则得分
    * 根据条件匹配情况计算规则的总得分
+   * 集成反思层权重调整
    */
   calculateRuleScore(rule: Rule, context: SilentContext): number {
     let totalScore = 0;
@@ -237,7 +227,25 @@ export class RuleEngine {
       totalWeight += condition.weight;
     }
 
-    return totalWeight > 0 ? totalScore / totalWeight : 0;
+    const baseScore = totalWeight > 0 ? totalScore / totalWeight : 0;
+
+    // 应用反思层权重调整
+    const sceneWeight = this.getSceneWeightFromReflection(context.context);
+    const adjustedScore = baseScore * sceneWeight;
+
+    return adjustedScore;
+  }
+
+  /**
+   * 从反思层获取场景权重
+   */
+  private getSceneWeightFromReflection(sceneType: SceneType): number {
+    try {
+      return weightAdjuster.getWeight(sceneType);
+    } catch {
+      // 如果反思层未初始化，返回默认权重
+      return 1.0;
+    }
   }
 
   /**
@@ -273,6 +281,43 @@ export class RuleEngine {
     if (condition.type === 'location' && signal.value === 'UNKNOWN') {
       console.log(`[RuleEngine] Unknown location, skipping location condition`);
       return false; // 位置条件不满足，但不影响其他条件
+    }
+
+    // 日历信号的特殊处理：支持事件类型前缀匹配
+    if (condition.type === 'calendar') {
+      const signalEventType = signal.value.split('_')[0]; // 提取事件类型部分
+      const conditionEventType = condition.value.split('_')[0];
+
+      // 如果事件类型相同，就认为匹配
+      if (signalEventType === conditionEventType) {
+        console.log(`[RuleEngine] Calendar event type match: ${signal.value} matches ${condition.value}`);
+        return true;
+      }
+
+      // 支持 IMMINENT/SOON/UPCOMING 时间紧迫度匹配
+      if (condition.value.includes('_')) {
+        const conditionUrgency = condition.value.split('_')[1];
+        const signalUrgency = signal.value.split('_')[1];
+        
+        // IMMINENT 也匹配 SOON，SOON 也匹配 UPCOMING
+        if (conditionUrgency === 'UPCOMING' && 
+            (signalUrgency === 'IMMINENT' || signalUrgency === 'SOON' || signalUrgency === 'UPCOMING')) {
+          return signalEventType === conditionEventType;
+        }
+        if (conditionUrgency === 'SOON' && 
+            (signalUrgency === 'IMMINENT' || signalUrgency === 'SOON')) {
+          return signalEventType === conditionEventType;
+        }
+      }
+    }
+
+    // 电池信号的特殊处理：支持充电状态匹配
+    if (condition.type === 'battery') {
+      // CHARGING 匹配 CHARGING 和 CHARGING_FULL
+      if (condition.value === 'CHARGING' && 
+          (signal.value === 'CHARGING' || signal.value === 'CHARGING_FULL')) {
+        return true;
+      }
     }
 
     return false;

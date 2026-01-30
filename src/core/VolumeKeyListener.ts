@@ -5,7 +5,7 @@
  */
 
 import { DeviceEventEmitter, EmitterSubscription } from 'react-native';
-import { sceneBridge } from './SceneBridge';
+import { sceneBridge, isSceneBridgeNative } from './SceneBridge';
 
 export interface VolumeKeyEvent {
   trigger: string;
@@ -27,6 +27,11 @@ export class VolumeKeyListener {
   async enable(callback: VolumeKeyCallback): Promise<boolean> {
     try {
       console.log('启用音量键双击监听...');
+
+      if (!isSceneBridgeNative) {
+        console.warn('当前运行环境缺少原生 SceneBridge，已跳过音量键监听');
+        return false;
+      }
       
       // 如果已经启用，先禁用
       if (this.isEnabled) {
@@ -69,6 +74,17 @@ export class VolumeKeyListener {
   async disable(): Promise<boolean> {
     try {
       console.log('禁用音量键双击监听...');
+
+      if (!isSceneBridgeNative) {
+        // 在无原生环境下只需要移除 JS 侧订阅
+        if (this.subscription) {
+          this.subscription.remove();
+          this.subscription = null;
+        }
+        this.callback = null;
+        this.isEnabled = false;
+        return true;
+      }
 
       // 移除事件监听
       if (this.subscription) {

@@ -3,6 +3,10 @@
  * 
  * 职责：在置信度不足时，智能提示用户，并根据反馈学习。
  * 实现置信度阈值检查、停留时间检查、冷却机制等功能。
+ * 
+ * 集成反思层：
+ * - FeedbackLogger: 记录用户反馈详情
+ * - WeightAdjuster: 根据反馈动态调整场景权重
  */
 
 import {
@@ -13,6 +17,8 @@ import {
   UserFeedback,
   StorageKeys,
 } from '../types';
+import { feedbackLogger } from '../reflection/FeedbackLogger';
+import { weightAdjuster } from '../reflection/WeightAdjuster';
 
 /**
  * 简单的存储接口
@@ -114,6 +120,11 @@ export class PredictiveTrigger {
   private dwellTracker: DwellTimeTracker | null = null;
 
   /**
+   * 反思层初始化状态
+   */
+  private reflectionInitialized = false;
+
+  /**
    * 配置常量
    */
   private readonly config = {
@@ -142,6 +153,25 @@ export class PredictiveTrigger {
     
     // 加载历史数据
     this.loadHistoryFromStorage();
+    
+    // 初始化反思层（异步）
+    this.initializeReflection();
+  }
+
+  /**
+   * 初始化反思层
+   */
+  private async initializeReflection(): Promise<void> {
+    if (this.reflectionInitialized) return;
+    
+    try {
+      await feedbackLogger.initialize();
+      await weightAdjuster.initialize();
+      this.reflectionInitialized = true;
+      console.log('[PredictiveTrigger] Reflection layer initialized');
+    } catch (error) {
+      console.error('[PredictiveTrigger] Failed to initialize reflection layer:', error);
+    }
   }
 
   /**
@@ -207,11 +237,19 @@ export class PredictiveTrigger {
    * - 记录用户的"接受/忽略/取消"操作
    * - 跟踪连续忽略次数，实现触发频率调整
    * - 在自动模式下记录反馈并调整场景权重
+   * - 集成反思层进行反馈分析和权重调整
    * 
    * @param sceneType 场景类型
    * @param feedback 用户反馈
+   * @param confidence 触发时的置信度
+   * @param contextSignals 触发时的信号摘要
    */
-  recordFeedback(sceneType: SceneType, feedback: UserFeedback): void {
+  recordFeedback(
+    sceneType: SceneType, 
+    feedback: UserFeedback,
+    confidence: number = 0.7,
+    contextSignals: string[] = []
+  ): void {
     const history = this.getHistory(sceneType);
     
     // 更新触发时间
@@ -246,6 +284,13 @@ export class PredictiveTrigger {
     // 更新缓存和存储
     this.historyCache.set(sceneType, history);
     this.saveHistoryToStorage();
+
+    // === 反思层集成 ===
+    // 记录详细反馈到 FeedbackLogger
+    this.logFeedbackToReflection(sceneType, feedback, confidence, contextSignals);
+    
+    // 触发权重调整检查
+    this.checkWeightAdjustment(sceneType);
 
     // 检查是否应该建议升级为自动模式
     if (this.shouldSuggestAutoMode(history)) {
@@ -758,6 +803,84 @@ export class PredictiveTrigger {
     history.consecutiveIgnores = 0;
     this.historyCache.set(sceneType, history);
     this.saveHistoryToStorage();
+  }
+
+  // ==================== 反思层集成方法 ====================
+
+  /**
+   * 记录反馈到反思层
+   */
+  private async logFeedbackToReflection(
+    sceneType: SceneType,
+    feedback: UserFeedback,
+    confidence: number,
+    contextSignals: string[]
+  ): Promise<void> {
+    if (!this.reflectionInitialized) {
+      await this.initializeReflection();
+    }
+
+    try {
+      await feedbackLogger.logFeedback(
+        sceneType,
+        feedback,
+        confidence,
+        contextSignals,
+        feedback === 'accept' ? ['场景已执行'] : undefined
+      );
+    } catch (error) {
+      console.error('[PredictiveTrigger] Failed to log feedback to reflection:', error);
+    }
+  }
+
+  /**
+   * 检查并触发权重调整
+   */
+  private async checkWeightAdjustment(sceneType: SceneType): Promise<void> {
+    if (!this.reflectionInitialized) return;
+
+    try {
+      await weightAdjuster.onUserFeedback(sceneType);
+    } catch (error) {
+      console.error('[PredictiveTrigger] Failed to check weight adjustment:', error);
+    }
+  }
+
+  /**
+   * 获取场景的调整后权重
+   * 
+   * @param sceneType 场景类型
+   * @returns 调整后的权重
+   */
+  getSceneWeight(sceneType: SceneType): number {
+    if (!this.reflectionInitialized) return 1.0;
+    return weightAdjuster.getWeight(sceneType);
+  }
+
+  /**
+   * 获取反馈统计（从反思层）
+   */
+  getFeedbackStats(sceneType: SceneType) {
+    if (!this.reflectionInitialized) return null;
+    return feedbackLogger.getStats(sceneType);
+  }
+
+  /**
+   * 获取调整建议
+   */
+  getAdjustmentRecommendations() {
+    if (!this.reflectionInitialized) return [];
+    return weightAdjuster.getAdjustmentRecommendations();
+  }
+
+  /**
+   * 自动应用推荐的权重调整
+   */
+  async autoApplyWeightAdjustments(): Promise<number> {
+    if (!this.reflectionInitialized) {
+      await this.initializeReflection();
+    }
+    return weightAdjuster.autoApplyRecommendations();
   }
 }
 

@@ -558,15 +558,17 @@ class NotificationManagerClass {
       const primaryAction = actionsToShow[0];
 
       // 构建 Android 操作按钮
-      const androidActions: Notifications.NotificationActionInput[] = [];
+      const androidActions: Notifications.NotificationAction[] = [];
 
       if (primaryAction && Platform.OS === 'android') {
         androidActions.push({
           identifier: `suggestion_${scenePackage.sceneId}_${primaryAction.id}`,
           buttonTitle: primaryAction.label,
-          // 打开应用到前台以便执行操作
-          opensAppToForeground: true,
-        });
+          // 注：新版 expo-notifications 使用 options 对象来配置
+          options: {
+            opensAppToForeground: true,
+          },
+        } as Notifications.NotificationAction);
       }
 
       const secondaryAction = actionsToShow[1];
@@ -574,8 +576,10 @@ class NotificationManagerClass {
         androidActions.push({
           identifier: `suggestion_${scenePackage.sceneId}_${secondaryAction.id}`,
           buttonTitle: secondaryAction.label,
-          opensAppToForeground: false,
-        });
+          options: {
+            opensAppToForeground: false,
+          },
+        } as Notifications.NotificationAction);
       }
 
       const notificationContent: Notifications.NotificationContentInput = {

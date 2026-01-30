@@ -5,7 +5,7 @@
  * 实现完整的场景感知和自动化流程
  */
 
-import { SilentContextEngine } from '../sensors/SilentContextEngine';
+import { SilentContextEngine } from '../core/SilentContextEngine';
 import { RuleEngine } from './RuleEngine';
 import { SceneExecutor } from '../executors/SceneExecutor';
 

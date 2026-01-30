@@ -1,7 +1,75 @@
 {
-  "version": "1.0.0",
-  "lastUpdated": "2024-01-19",
+  "version": "1.1.0",
+  "lastUpdated": "2025-01-30",
   "deeplinks": {
+    "maps": {
+      "amap": {
+        "packageName": "com.autonavi.minimap",
+        "name": "高德地图",
+        "deeplinks": [
+          {
+            "url": "androidamap://viewMap?sourceApplication=SceneLens&lat={lat}&lon={lng}&dev=0",
+            "description": "在地图上查看位置",
+            "action": "view_location",
+            "fallback": "https://uri.amap.com/marker?position={lng},{lat}&name=选择位置"
+          },
+          {
+            "url": "androidamap://poi?sourceApplication=SceneLens&keywords=&lat={lat}&lon={lng}",
+            "description": "搜索附近地点",
+            "action": "search_nearby",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "baidumap": {
+        "packageName": "com.baidu.BaiduMap",
+        "name": "百度地图",
+        "deeplinks": [
+          {
+            "url": "baidumap://map/marker?location={lat},{lng}&title=选择位置&content=SceneLens&src=com.scenelens",
+            "description": "在地图上标记位置",
+            "action": "view_location",
+            "fallback": "https://api.map.baidu.com/marker?location={lat},{lng}&title=选择位置&output=html"
+          },
+          {
+            "url": "baidumap://map/geocoder?location={lat},{lng}&src=com.scenelens",
+            "description": "地理编码",
+            "action": "geocode",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "qqmap": {
+        "packageName": "com.tencent.map",
+        "name": "腾讯地图",
+        "deeplinks": [
+          {
+            "url": "qqmap://map/marker?marker=coord:{lat},{lng};title:选择位置",
+            "description": "在地图上标记位置",
+            "action": "view_location",
+            "fallback": "https://apis.map.qq.com/uri/v1/marker?marker=coord:{lat},{lng};title:选择位置"
+          }
+        ]
+      },
+      "googleMaps": {
+        "packageName": "com.google.android.apps.maps",
+        "name": "Google Maps",
+        "deeplinks": [
+          {
+            "url": "geo:{lat},{lng}?q={lat},{lng}",
+            "description": "在地图上查看位置",
+            "action": "view_location",
+            "fallback": "https://www.google.com/maps?q={lat},{lng}"
+          },
+          {
+            "url": "google.navigation:q={lat},{lng}",
+            "description": "导航到位置",
+            "action": "navigate",
+            "fallback": "https://www.google.com/maps/dir/?api=1&destination={lat},{lng}"
+          }
+        ]
+      }
+    },
     "transit": {
       "alipay": {
         "packageName": "com.eg.android.AlipayGphone",
@@ -193,6 +261,78 @@
             "url": "variflight://",
             "description": "打开飞常准",
             "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "airchina": {
+        "packageName": "com.airchina.mobileapp",
+        "name": "中国国航",
+        "deeplinks": [
+          {
+            "url": "caapp://",
+            "description": "打开国航App",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "chinaeastern": {
+        "packageName": "com.ceair.b2m",
+        "name": "东方航空",
+        "deeplinks": [
+          {
+            "url": "ceair://",
+            "description": "打开东航App",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "chinasouthern": {
+        "packageName": "com.csair.mbp",
+        "name": "南方航空",
+        "deeplinks": [
+          {
+            "url": "csair://",
+            "description": "打开南航App",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "umetrip": {
+        "packageName": "com.cares.airtravelphone",
+        "name": "航旅纵横",
+        "deeplinks": [
+          {
+            "url": "umetrip://",
+            "description": "打开航旅纵横",
+            "action": "open_home",
+            "fallback": "打开首页"
+          },
+          {
+            "url": "umetrip://flight",
+            "description": "航班动态",
+            "action": "open_flight",
+            "fallback": "打开首页"
+          }
+        ]
+      },
+      "qunar": {
+        "packageName": "com.Qunar",
+        "name": "去哪儿",
+        "deeplinks": [
+          {
+            "url": "qunarclient://",
+            "description": "打开去哪儿",
+            "action": "open_home",
+            "fallback": "打开首页"
+          },
+          {
+            "url": "qunarclient://flight/list",
+            "description": "机票列表",
+            "action": "open_flights",
             "fallback": "打开首页"
           }
         ]

@@ -181,7 +181,7 @@ export const SceneConfigScreen: React.FC = () => {
       console.log(`[SceneConfig] Attempting to launch app: ${packageName}`);
 
       // 直接尝试启动，让 native 端检查应用是否安装
-      const success = await sceneBridge.openAppWithDeepLink(packageName, null);
+      const success = await sceneBridge.openAppWithDeepLink(packageName, undefined);
       if (success) {
         console.log(`[SceneConfig] Launched app: ${packageName}`);
       } else {

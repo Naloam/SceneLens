@@ -5,6 +5,4 @@
  */
 
 export { SilentContextEngine, silentContextEngine } from '../core/SilentContextEngine';
-export { runVerification } from './verify';
-export { runDemo } from './demo';
 

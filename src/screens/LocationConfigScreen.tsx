@@ -3,12 +3,15 @@
  * 用于设置家、办公室、地铁站的地理围栏
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
   Alert,
+  Linking,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import {
   TextInput,
@@ -21,6 +24,9 @@ import {
   useTheme,
   Divider,
   ProgressBar,
+  Portal,
+  Modal,
+  IconButton,
 } from 'react-native-paper';
 import Slider from '@react-native-community/slider';
 import { geoFenceManager } from '../stores';
@@ -51,6 +57,19 @@ export const LocationConfigScreen: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<Location | null>(null);
   const [selectedTab, setSelectedTab] = useState<FenceConfigType>('HOME');
+
+  // 手动输入相关状态
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualLatitude, setManualLatitude] = useState('');
+  const [manualLongitude, setManualLongitude] = useState('');
+  const [manualInputType, setManualInputType] = useState<FenceConfigType>('HOME');
+
+  // 滑块临时值状态（避免频繁更新）
+  const [sliderValues, setSliderValues] = useState<Record<FenceConfigType, number>>({
+    HOME: 100,
+    OFFICE: 200,
+    SUBWAY_STATION: 150,
+  });
 
   // 围栏配置
   const [fenceConfigs, setFenceConfigs] = useState<Record<FenceConfigType, FenceConfig>>({
@@ -86,6 +105,23 @@ export const LocationConfigScreen: React.FC = () => {
   useEffect(() => {
     initializeLocationConfig();
   }, []);
+
+  // 同步滑块值到围栏配置
+  useEffect(() => {
+    const updatedSliderValues = { ...sliderValues };
+    let hasChanges = false;
+    
+    for (const [type, config] of Object.entries(fenceConfigs)) {
+      if (config.fence && config.fence.radius !== updatedSliderValues[type as FenceConfigType]) {
+        updatedSliderValues[type as FenceConfigType] = config.fence.radius;
+        hasChanges = true;
+      }
+    }
+    
+    if (hasChanges) {
+      setSliderValues(updatedSliderValues);
+    }
+  }, [fenceConfigs]);
 
   /**
    * 初始化位置配置
@@ -244,17 +280,233 @@ export const LocationConfigScreen: React.FC = () => {
   };
 
   /**
-   * 更新围栏半径
+   * 更新围栏半径（滑块滑动时更新本地状态）
    */
-  const updateFenceRadius = async (type: FenceConfigType, radius: number) => {
+  const handleSliderChange = useCallback((type: FenceConfigType, value: number) => {
+    setSliderValues(prev => ({
+      ...prev,
+      [type]: Math.round(value),
+    }));
+  }, []);
+
+  /**
+   * 打开手动输入对话框
+   */
+  const openManualInput = (type: FenceConfigType) => {
+    const config = fenceConfigs[type];
+    setManualInputType(type);
+    
+    // 如果已有围栏，预填充坐标
+    if (config.fence) {
+      setManualLatitude(config.fence.latitude.toFixed(6));
+      setManualLongitude(config.fence.longitude.toFixed(6));
+    } else if (currentLocation) {
+      setManualLatitude(currentLocation.latitude.toFixed(6));
+      setManualLongitude(currentLocation.longitude.toFixed(6));
+    } else {
+      setManualLatitude('');
+      setManualLongitude('');
+    }
+    
+    setShowManualInput(true);
+  };
+
+  /**
+   * 验证经纬度输入
+   */
+  const validateCoordinates = (lat: string, lng: string): { valid: boolean; error?: string } => {
+    const latNum = parseFloat(lat);
+    const lngNum = parseFloat(lng);
+    
+    if (isNaN(latNum) || isNaN(lngNum)) {
+      return { valid: false, error: '请输入有效的数字' };
+    }
+    
+    if (latNum < -90 || latNum > 90) {
+      return { valid: false, error: '纬度范围: -90 到 90' };
+    }
+    
+    if (lngNum < -180 || lngNum > 180) {
+      return { valid: false, error: '经度范围: -180 到 180' };
+    }
+    
+    return { valid: true };
+  };
+
+  /**
+   * 保存手动输入的坐标
+   */
+  const saveManualCoordinates = async () => {
+    const validation = validateCoordinates(manualLatitude, manualLongitude);
+    if (!validation.valid) {
+      Alert.alert('输入错误', validation.error);
+      return;
+    }
+
+    const latitude = parseFloat(manualLatitude);
+    const longitude = parseFloat(manualLongitude);
+    const config = fenceConfigs[manualInputType];
+
+    try {
+      setIsLoading(true);
+      Keyboard.dismiss();
+
+      if (config.fence) {
+        // 更新现有围栏
+        const updated = await geoFenceManager.updateGeoFence(config.fence.id, {
+          latitude,
+          longitude,
+        });
+
+        if (updated) {
+          setFenceConfigs(prev => ({
+            ...prev,
+            [manualInputType]: { ...prev[manualInputType], fence: updated },
+          }));
+        }
+      } else {
+        // 创建新围栏
+        const newFence = await geoFenceManager.createGeoFence(
+          config.name,
+          manualInputType,
+          latitude,
+          longitude,
+          config.defaultRadius
+        );
+
+        setFenceConfigs(prev => ({
+          ...prev,
+          [manualInputType]: { ...prev[manualInputType], fence: newFence },
+        }));
+      }
+
+      // 刷新静默引擎的地理配置
+      await silentContextEngine.refreshGeoConfiguration();
+
+      setShowManualInput(false);
+      Alert.alert('成功', `${config.displayName}位置已更新`);
+    } catch (error) {
+      console.error('保存坐标失败:', error);
+      Alert.alert('错误', '保存位置失败');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * 打开地图应用选择位置
+   */
+  const openMapForLocationPick = async (type: FenceConfigType) => {
+    const config = fenceConfigs[type];
+    const lat = config.fence?.latitude ?? currentLocation?.latitude ?? 39.9042;
+    const lng = config.fence?.longitude ?? currentLocation?.longitude ?? 116.4074;
+
+    // 地图应用的 deeplink 配置
+    const mapApps = [
+      {
+        name: '高德地图',
+        deeplink: `androidamap://viewMap?sourceApplication=SceneLens&lat=${lat}&lon=${lng}&dev=0`,
+        package: 'com.autonavi.minimap',
+        webUrl: `https://uri.amap.com/marker?position=${lng},${lat}&name=选择位置`,
+      },
+      {
+        name: '百度地图',
+        deeplink: `baidumap://map/marker?location=${lat},${lng}&title=选择位置&content=SceneLens&src=com.scenelens`,
+        package: 'com.baidu.BaiduMap',
+        webUrl: `https://api.map.baidu.com/marker?location=${lat},${lng}&title=选择位置&output=html`,
+      },
+      {
+        name: '腾讯地图',
+        deeplink: `qqmap://map/marker?marker=coord:${lat},${lng};title:选择位置`,
+        package: 'com.tencent.map',
+        webUrl: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat},${lng};title:选择位置`,
+      },
+      {
+        name: 'Google Maps',
+        deeplink: `geo:${lat},${lng}?q=${lat},${lng}`,
+        package: 'com.google.android.apps.maps',
+        webUrl: `https://www.google.com/maps?q=${lat},${lng}`,
+      },
+    ];
+
+    // 显示地图应用选择对话框
+    Alert.alert(
+      '选择地图应用',
+      '请选择要打开的地图应用来选择位置。\n\n提示：选择位置后，请复制坐标并使用"手动输入"功能填入。',
+      [
+        ...mapApps.map(app => ({
+          text: app.name,
+          onPress: async () => {
+            try {
+              const canOpen = await Linking.canOpenURL(app.deeplink);
+              if (canOpen) {
+                await Linking.openURL(app.deeplink);
+              } else {
+                // 尝试打开网页版
+                await Linking.openURL(app.webUrl);
+              }
+            } catch (error) {
+              console.error(`打开${app.name}失败:`, error);
+              Alert.alert('提示', `无法打开${app.name}，请确保已安装该应用`);
+            }
+          },
+        })),
+        { text: '取消', style: 'cancel' },
+      ]
+    );
+  };
+
+  /**
+   * 从剪贴板粘贴坐标
+   */
+  const pasteFromClipboard = async () => {
+    try {
+      // React Native 需要使用 @react-native-clipboard/clipboard 包
+      // 这里提供一个简化的提示
+      Alert.alert(
+        '粘贴坐标',
+        '请在输入框中长按粘贴坐标。\n\n支持的格式：\n• 39.9042, 116.4074\n• 39.9042,116.4074\n• 纬度：39.9042 经度：116.4074',
+        [{ text: '知道了' }]
+      );
+    } catch (error) {
+      console.error('粘贴失败:', error);
+    }
+  };
+
+  /**
+   * 解析粘贴的坐标字符串
+   */
+  const parseCoordinateString = (text: string): { lat: string; lng: string } | null => {
+    // 尝试匹配常见的坐标格式
+    const patterns = [
+      /(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/,  // 39.9042, 116.4074
+      /纬度[：:]\s*(-?\d+\.?\d*)\s*经度[：:]\s*(-?\d+\.?\d*)/,
+      /lat[：:]\s*(-?\d+\.?\d*)\s*lng[：:]\s*(-?\d+\.?\d*)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        return { lat: match[1], lng: match[2] };
+      }
+    }
+
+    return null;
+  };
+
+  /**
+   * 保存围栏半径（滑块停止时保存到存储）
+   */
+  const handleSliderComplete = useCallback(async (type: FenceConfigType, value: number) => {
     const config = fenceConfigs[type];
     if (!config.fence) {
       return;
     }
 
     try {
+      const roundedValue = Math.round(value);
       const updated = await geoFenceManager.updateGeoFence(config.fence.id, {
-        radius: Math.round(radius),
+        radius: roundedValue,
       });
 
       if (updated) {
@@ -262,10 +514,19 @@ export const LocationConfigScreen: React.FC = () => {
           ...prev,
           [type]: { ...prev[type], fence: updated },
         }));
+        console.log(`[LocationConfigScreen] 围栏半径已更新: ${type} -> ${roundedValue}m`);
       }
     } catch (error) {
       console.error('更新半径失败:', error);
+      Alert.alert('错误', '更新围栏半径失败');
     }
+  }, [fenceConfigs]);
+
+  /**
+   * 更新围栏半径（旧方法，保留兼容性）
+   */
+  const updateFenceRadius = async (type: FenceConfigType, radius: number) => {
+    await handleSliderComplete(type, radius);
   };
 
   /**
@@ -320,12 +581,13 @@ export const LocationConfigScreen: React.FC = () => {
                 <View style={styles.radiusHeader}>
                   <Text variant="bodyMedium">围栏半径</Text>
                   <Text variant="bodyMedium" style={{ color: theme.colors.primary }}>
-                    {config.fence.radius} 米
+                    {sliderValues[type]} 米
                   </Text>
                 </View>
                 <Slider
-                  value={config.fence.radius}
-                  onValueChange={(value) => updateFenceRadius(type, value)}
+                  value={sliderValues[type]}
+                  onValueChange={(value) => handleSliderChange(type, value)}
+                  onSlidingComplete={(value) => handleSliderComplete(type, value)}
                   minimumValue={50}
                   maximumValue={500}
                   step={10}
@@ -345,11 +607,33 @@ export const LocationConfigScreen: React.FC = () => {
                   mode="outlined"
                   onPress={() => setCurrentLocationAsFence(type)}
                   disabled={!currentLocation || isLoading}
-                  icon="map-marker"
+                  icon="crosshairs-gps"
                   style={styles.actionButton}
                   compact
                 >
-                  更新位置
+                  当前位置
+                </Button>
+                <Button
+                  mode="outlined"
+                  onPress={() => openManualInput(type)}
+                  disabled={isLoading}
+                  icon="pencil"
+                  style={styles.actionButton}
+                  compact
+                >
+                  手动输入
+                </Button>
+              </View>
+              <View style={styles.fenceActions}>
+                <Button
+                  mode="outlined"
+                  onPress={() => openMapForLocationPick(type)}
+                  disabled={isLoading}
+                  icon="map-search"
+                  style={styles.actionButton}
+                  compact
+                >
+                  从地图选择
                 </Button>
                 <Button
                   mode="text"
@@ -368,14 +652,36 @@ export const LocationConfigScreen: React.FC = () => {
               <Text variant="bodyMedium" style={styles.noFenceText}>
                 尚未设置{config.displayName}
               </Text>
+              <View style={styles.setupButtonsRow}>
+                <Button
+                  mode="contained"
+                  onPress={() => setCurrentLocationAsFence(type)}
+                  disabled={!currentLocation || isLoading}
+                  icon="crosshairs-gps"
+                  style={styles.setupButton}
+                  compact
+                >
+                  当前位置
+                </Button>
+                <Button
+                  mode="outlined"
+                  onPress={() => openManualInput(type)}
+                  disabled={isLoading}
+                  icon="pencil"
+                  style={styles.setupButton}
+                  compact
+                >
+                  手动输入
+                </Button>
+              </View>
               <Button
-                mode="contained"
-                onPress={() => setCurrentLocationAsFence(type)}
-                disabled={!currentLocation || isLoading}
-                icon="map-marker"
-                style={styles.setButton}
+                mode="text"
+                onPress={() => openMapForLocationPick(type)}
+                disabled={isLoading}
+                icon="map-search"
+                style={{ marginTop: 8 }}
               >
-                设置当前位置
+                从地图应用选择位置
               </Button>
             </View>
           )}
@@ -469,6 +775,9 @@ export const LocationConfigScreen: React.FC = () => {
             • 围栏半径决定了触发范围，建议根据实际情况调整
           </Text>
           <Text variant="bodyMedium" style={styles.infoText}>
+            • 支持从地图应用选择位置或手动输入经纬度
+          </Text>
+          <Text variant="bodyMedium" style={styles.infoText}>
             • 位置信息仅在本地使用，不会上传到服务器
           </Text>
         </Card.Content>
@@ -476,6 +785,79 @@ export const LocationConfigScreen: React.FC = () => {
 
       {/* 底部间距 */}
       <View style={styles.bottomSpacer} />
+
+      {/* 手动输入坐标对话框 */}
+      <Portal>
+        <Modal
+          visible={showManualInput}
+          onDismiss={() => setShowManualInput(false)}
+          contentContainerStyle={styles.modalContainer}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text variant="titleLarge" style={styles.modalTitle}>
+                手动输入坐标
+              </Text>
+              <IconButton
+                icon="close"
+                size={24}
+                onPress={() => setShowManualInput(false)}
+              />
+            </View>
+            
+            <Text variant="bodyMedium" style={styles.modalSubtitle}>
+              设置 {fenceConfigs[manualInputType]?.displayName} 的位置坐标
+            </Text>
+
+            <TextInput
+              label="纬度 (Latitude)"
+              value={manualLatitude}
+              onChangeText={setManualLatitude}
+              keyboardType="numeric"
+              placeholder="例如：39.9042"
+              style={styles.input}
+              mode="outlined"
+              right={<TextInput.Affix text="°" />}
+            />
+
+            <TextInput
+              label="经度 (Longitude)"
+              value={manualLongitude}
+              onChangeText={setManualLongitude}
+              keyboardType="numeric"
+              placeholder="例如：116.4074"
+              style={styles.input}
+              mode="outlined"
+              right={<TextInput.Affix text="°" />}
+            />
+
+            <Text variant="bodySmall" style={styles.coordinateHint}>
+              💡 提示：可以从地图应用中获取精确坐标，格式为"纬度, 经度"
+            </Text>
+
+            <View style={styles.modalActions}>
+              <Button
+                mode="outlined"
+                onPress={() => openMapForLocationPick(manualInputType)}
+                icon="map-search"
+                style={styles.modalButton}
+              >
+                从地图获取
+              </Button>
+              <Button
+                mode="contained"
+                onPress={saveManualCoordinates}
+                disabled={!manualLatitude || !manualLongitude || isLoading}
+                loading={isLoading}
+                icon="check"
+                style={styles.modalButton}
+              >
+                保存
+              </Button>
+            </View>
+          </View>
+        </Modal>
+      </Portal>
     </ScrollView>
   );
 };
@@ -638,6 +1020,52 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 32,
+  },
+  // 新增样式
+  setupButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 8,
+  },
+  setupButton: {
+    flex: 1,
+  },
+  modalContainer: {
+    backgroundColor: 'white',
+    margin: 20,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  modalContent: {
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontWeight: '700',
+  },
+  modalSubtitle: {
+    opacity: 0.7,
+    marginBottom: 20,
+  },
+  input: {
+    marginBottom: 16,
+  },
+  coordinateHint: {
+    opacity: 0.6,
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
   },
 });
 

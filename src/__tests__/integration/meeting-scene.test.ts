@@ -7,7 +7,7 @@
  * 3. Rule matching and execution
  */
 
-import { silentContextEngine } from '../../sensors/SilentContextEngine';
+import { silentContextEngine } from '../../core/SilentContextEngine';
 import { RuleEngine } from '../../rules/RuleEngine';
 import { SceneExecutor } from '../../executors/SceneExecutor';
 import { appDiscoveryEngine } from '../../discovery/AppDiscoveryEngine';

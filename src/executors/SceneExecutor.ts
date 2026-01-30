@@ -128,7 +128,7 @@ export class SceneExecutor {
     const appAction = this.extractAction(action);
 
     // 使用 Deep Link 管理器打开应用（已内置三级降级策略）
-    const success = await deepLinkManager.openAppWithDeepLink(
+    const success = await deepLinkManager.openWithDeepLink(
       packageName,
       action.deepLink,
       appAction
@@ -136,6 +136,14 @@ export class SceneExecutor {
 
     if (success) {
       console.log(`[SceneExecutor] Successfully opened app: ${packageName}`);
+      return;
+    }
+
+    // 如果 deep link 失败，尝试使用空 deepLink 再次尝试（会触发原生 launcher intent）
+    console.warn(`[SceneExecutor] Deep link failed for ${packageName}, trying launch intent`);
+    const fallbackSuccess = await SceneBridge.openAppWithDeepLink(packageName, undefined);
+    if (fallbackSuccess) {
+      console.log(`[SceneExecutor] Successfully opened app with launch intent: ${packageName}`);
       return;
     }
 
@@ -204,9 +212,19 @@ export class SceneExecutor {
       MUSIC_PLAYER_TOP1: 'com.netease.cloudmusic',
       CALENDAR_TOP1: 'com.android.calendar',
       MEETING_APP_TOP1: 'com.tencent.wework',
-      STUDY_APP_TOP1: 'camp.firefly.foresto',
+      STUDY_APP_TOP1: 'com.chaoxing.mobile', // 学习通
+      STUDY_APP_TOP2: 'com.netease.edu.ucmooc', // 中国大学MOOC
+      STUDY_APP_TOP3: 'camp.firefly.foresto', // Forest
+      STUDY_APP_TOP4: 'com.fenbi.android.solar', // 猿题库
+      STUDY_APP_TOP5: 'com.zhihu.android', // 知乎
       TRAVEL_APP_TOP1: 'com.MobileTicket',
       SMART_HOME_TOP1: 'com.xiaomi.smarthome',
+      PAYMENT_APP_TOP1: 'com.eg.android.AlipayGphone',
+      MAP_APP_TOP1: 'com.autonavi.minimap', // 高德地图
+      MAP_APP_TOP2: 'com.baidu.BaiduMap', // 百度地图
+      RIDE_SHARE_APP_TOP1: 'com.sdu.didi.psnger', // 滴滴出行
+      SOCIAL_APP_TOP1: 'com.tencent.mm', // 微信
+      SOCIAL_APP_TOP2: 'com.tencent.mobileqq', // QQ
     };
     return fallbackMap[intent] || null;
   }
@@ -311,3 +329,7 @@ export class SceneExecutor {
     return { healthy, unhealthy };
   }
 }
+// 导出单例实例
+export const sceneExecutor = new SceneExecutor();
+
+export default SceneExecutor;

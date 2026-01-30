@@ -10,7 +10,7 @@
  * 6. 记录用户反馈
  */
 
-import { SilentContextEngine } from '../../sensors/SilentContextEngine';
+import { SilentContextEngine } from '../../core/SilentContextEngine';
 import { RuleEngine } from '../../rules/RuleEngine';
 import { sceneSuggestionManager } from '../../services/SceneSuggestionManager';
 import { notificationManager } from '../../notifications/NotificationManager';

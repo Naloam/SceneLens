@@ -10,7 +10,7 @@
  * Requirements: 需求 2.1, 2.2, 2.3, 2.4
  */
 
-import { SilentContextEngine } from '../../sensors/SilentContextEngine';
+import { SilentContextEngine } from '../../core/SilentContextEngine';
 import { RuleEngine } from '../../rules/RuleEngine';
 import { SceneExecutor } from '../../executors/SceneExecutor';
 import { AppDiscoveryEngine } from '../../discovery/AppDiscoveryEngine';

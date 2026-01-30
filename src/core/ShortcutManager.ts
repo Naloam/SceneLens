@@ -5,7 +5,7 @@
  */
 
 import { DeviceEventEmitter, EmitterSubscription } from 'react-native';
-import { sceneBridge } from './SceneBridge';
+import { sceneBridge, isSceneBridgeNative } from './SceneBridge';
 
 export interface ShortcutEvent {
   trigger: 'desktop_shortcut';
@@ -25,6 +25,11 @@ export class ShortcutManager {
   async createSceneAnalysisShortcut(): Promise<boolean> {
     try {
       console.log('创建场景分析桌面快捷方式...');
+
+      if (!isSceneBridgeNative) {
+        console.warn('当前运行环境缺少原生 SceneBridge，跳过创建快捷方式');
+        return false;
+      }
       
       // 检查是否支持快捷方式
       const supported = await sceneBridge.isShortcutSupported();
@@ -54,6 +59,10 @@ export class ShortcutManager {
   async removeSceneAnalysisShortcut(): Promise<boolean> {
     try {
       console.log('删除场景分析桌面快捷方式...');
+
+      if (!isSceneBridgeNative) {
+        return true; // 无原生实现时视为已移除
+      }
       
       const success = await sceneBridge.removeSceneAnalysisShortcut();
       
@@ -75,6 +84,9 @@ export class ShortcutManager {
    */
   async isShortcutSupported(): Promise<boolean> {
     try {
+      if (!isSceneBridgeNative) {
+        return false;
+      }
       return await sceneBridge.isShortcutSupported();
     } catch (error) {
       console.error('检查快捷方式支持时发生错误:', error);
@@ -90,6 +102,11 @@ export class ShortcutManager {
   enableShortcutListener(callback: ShortcutEventCallback): boolean {
     try {
       console.log('启用桌面快捷方式事件监听...');
+
+      if (!isSceneBridgeNative) {
+        console.warn('当前运行环境缺少原生 SceneBridge，已跳过快捷方式监听');
+        return false;
+      }
       
       // 如果已经有监听器，先清理
       this.disableShortcutListener();

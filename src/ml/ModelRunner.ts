@@ -3,7 +3,103 @@
  * Supports both image and audio classification models
  */
 import { loadTensorflowModel, TensorflowModel } from 'react-native-fast-tflite';
+import * as FileSystem from 'expo-file-system';
+import { Platform, Image, NativeModules } from 'react-native';
 import modelConfig from '../../assets/models/model_config.json';
+
+/**
+ * 替换 localhost 为可访问的地址
+ * - 模拟器：使用 10.0.2.2
+ * - 真实设备：需要用户配置局域网 IP
+ */
+function fixLocalhostUrl(uri: string): string {
+  if (!__DEV__ || !uri.includes('localhost')) {
+    return uri;
+  }
+  
+  const resolveDevServer = (): string | null => {
+    // 手动指定（例如 DEV_SERVER_HOST=192.168.5.2:8081 或 https://192.168.5.2:8081）
+    const envHost = process.env.EXPO_DEV_SERVER_HOST || process.env.DEV_SERVER_HOST;
+    if (envHost) {
+      return envHost;
+    }
+
+    // 从 RN runtime 解析当前 bundle 的来源（适用于真机 + 模拟器）
+    const scriptURL = (NativeModules as any)?.SourceCode?.scriptURL as string | undefined;
+    const match = scriptURL?.match(/^(https?|exp):\/\/([^/:]+)(?::(\d+))?/);
+    if (match) {
+      const [, , host, port] = match;
+      return port ? `${host}:${port}` : host;
+    }
+
+    // 最后兜底：Android 模拟器专用回环地址
+    if (Platform.OS === 'android') {
+      return '10.0.2.2:8081';
+    }
+
+    return null;
+  };
+
+  const devHost = resolveDevServer();
+  if (!devHost) {
+    console.warn('未能解析 Metro 开发服务器地址，继续使用 localhost');
+    return uri;
+  }
+
+  const hasProtocol = devHost.startsWith('http://') || devHost.startsWith('https://');
+  const protocol = uri.startsWith('https') ? 'https' : 'http';
+  const hostWithProtocol = hasProtocol ? devHost : `${protocol}://${devHost}`;
+
+  return uri.replace(/https?:\/\/localhost(:\d+)?/, hostWithProtocol);
+}
+
+/**
+ * 修复资源 URL 以便在不同环境中正确加载
+ * - 开发环境：从 Metro 加载器下载到缓存
+ * - 生产环境：使用打包的资源 URL
+ */
+async function getModelUri(modelRequire: any): Promise<string> {
+  const resolvedAsset = Image.resolveAssetSource(modelRequire);
+  console.log('Resolved model asset URI:', resolvedAsset.uri);
+
+  // 在生产环境或非 HTTP(S) URL，直接返回
+  if (!__DEV__ || !resolvedAsset.uri.startsWith('http')) {
+    return resolvedAsset.uri;
+  }
+
+  // 开发环境：使用 expo-file-system 下载到缓存
+  const fileName = resolvedAsset.uri.split('/').pop()?.split('?')[0] || 'model.tflite';
+  const cachePath = FileSystem.cacheDirectory + fileName;
+
+  // 检查缓存
+  const fileInfo = await FileSystem.getInfoAsync(cachePath);
+  if (fileInfo.exists) {
+    console.log('Using cached model:', cachePath, 'size:', fileInfo.size);
+    return cachePath;
+  }
+
+  // 修复 localhost URL
+  const downloadUrl = fixLocalhostUrl(resolvedAsset.uri);
+
+  // 下载模型
+  console.log('Downloading model from:', downloadUrl);
+  console.log('To:', cachePath);
+  try {
+    await FileSystem.downloadAsync(downloadUrl, cachePath);
+    const downloaded = await FileSystem.getInfoAsync(cachePath);
+    const fileSize = downloaded.exists ? (downloaded as any).size ?? 0 : 0;
+    console.log('Model downloaded successfully, size:', fileSize);
+    if (!downloaded.exists || fileSize === 0) {
+      throw new Error('模型下载结果为空');
+    }
+  } catch (error) {
+    console.error('Failed to download model:', error);
+    console.warn('提示：如果使用真实 Android 设备，请确保设备和电脑在同一局域网');
+    console.warn('提示：如果使用模拟器，确保 Metro 服务器正在运行');
+    throw error;
+  }
+  return cachePath;
+}
 
 export interface Prediction {
   label: string;
@@ -53,12 +149,14 @@ export class ModelRunner {
 
     try {
       console.log('Loading image classification model...');
-      const config = this.modelConfigs.mobilenet_v3_small;
-      
+
+      // 获取模型 URI（会处理下载/缓存）
+      const modelUri = await getModelUri(require('../../assets/models/mobilenet_v3_small_quant.tflite'));
+
       // Load the actual TFLite model
       this.imageModel = await loadTensorflowModel(
-        require('../../assets/models/mobilenet_v3_small_quant.tflite'),
-        'android-gpu' // Use GPU acceleration on Android
+        { url: modelUri },
+        'cpu' as any // 使用 CPU 后端以提升兼容性，GPU 在部分设备上会崩溃
       );
 
       console.log('Image model loaded successfully');
@@ -80,12 +178,14 @@ export class ModelRunner {
 
     try {
       console.log('Loading audio classification model...');
-      const config = this.modelConfigs.yamnet_lite;
-      
+
+      // 获取模型 URI（会处理下载/缓存）
+      const modelUri = await getModelUri(require('../../assets/models/yamnet_lite_quant.tflite'));
+
       // Load the actual TFLite model
       this.audioModel = await loadTensorflowModel(
-        require('../../assets/models/yamnet_lite_quant.tflite'),
-        'android-gpu' // Use GPU acceleration on Android
+        { url: modelUri },
+        'cpu' as any // 音频模型通常在 CPU 上更稳定，避免 GPU 后端不支持的问题
       );
 
       console.log('Audio model loaded successfully');
@@ -195,7 +295,8 @@ export class ModelRunner {
       console.log(`Preprocessing image: ${imageData.uri} (${imageData.width}x${imageData.height})`);
       
       const inputSize = height * width * channels;
-      const input = new Float32Array(inputSize);
+      // 模型输入为 uint8，这里使用 Uint8Array 提供 0-255 像素值
+      const input = new Uint8Array(inputSize);
       
       // Simulate realistic image preprocessing
       // MobileNetV3 typically expects input values in range [0, 1] or [-1, 1]
@@ -207,8 +308,8 @@ export class ModelRunner {
         // Generate values that look like normalized image pixels
         const pixelValue = Math.random() * 255; // Simulate 0-255 pixel value
         const channelIndex = i % 3; // RGB channel
-        const normalizedValue = (pixelValue - meanValues[channelIndex]) / stdValues[channelIndex];
-        input[i] = normalizedValue;
+        // 对于量化模型，直接提供 0-255 的 uint8 像素值即可
+        input[i] = Math.min(255, Math.max(0, Math.round(pixelValue)));
       }
       
       // Calculate min/max without spread operator to avoid stack overflow
@@ -220,7 +321,8 @@ export class ModelRunner {
       }
       
       console.log(`Image preprocessed: ${inputSize} values, range [${minVal}, ${maxVal}]`);
-      return input;
+      // 转回 Float32Array 以符合 run() 的参数类型，但数值保持 0-255
+      return new Float32Array(input);
       
     } catch (error) {
       console.error('Image preprocessing failed:', error);

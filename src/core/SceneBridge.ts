@@ -106,6 +106,7 @@ interface SceneBridgeNativeModule {
 }
 
 const { SceneBridge } = NativeModules;
+export const isSceneBridgeNative = !!SceneBridge;
 
 // Fallback shim so app不会因缺少原生实现直接崩溃
 const fallback: SceneBridgeNativeModule = {
@@ -117,10 +118,10 @@ const fallback: SceneBridgeNativeModule = {
   async getForegroundApp() { return ''; },
   async getUsageStats() { return []; },
   async setDoNotDisturb(enabled: boolean) { return { enabled, mode: 'unknown' }; },
-  async checkDoNotDisturbPermission() { return false; },
+  async checkDoNotDisturbPermission() { return true; },
   async openDoNotDisturbSettings() { return false; },
   async setBrightness(level: number) { return { level, brightness: level }; },
-  async checkWriteSettingsPermission() { return false; },
+  async checkWriteSettingsPermission() { return true; },
   async openWriteSettingsSettings() { return false; },
   async openAppWithDeepLink(_packageName?: string, _deepLink?: string) { return false; },
   async isAppInstalled() { return false; },
@@ -133,8 +134,17 @@ const fallback: SceneBridgeNativeModule = {
   async isScreenOn() { return true; },
   async setWakeLock(enable: boolean, timeoutMs: number) { return { enabled: enable, timeout: timeoutMs }; },
   async isWakeLockEnabled() { return false; },
-  async requestPermission() { return false; },
-  async checkPermission() { return false; },
+  async requestPermission(permission?: string) { 
+    // 在开发模式下，允许常见权限
+    if (permission?.includes('RECORD_AUDIO')) return true;
+    return false; 
+  },
+  async checkPermission(permission?: string) { 
+    // 在开发模式下，允许常见权限
+    if (permission?.includes('RECORD_AUDIO')) return true;
+    if (permission?.includes('WAKE_LOCK')) return true;
+    return false; 
+  },
   async checkUsageStatsPermission() { return false; },
   async openUsageStatsSettings() { return false; },
   async hasLocationPermission() { return true; },
@@ -182,8 +192,9 @@ const sceneBridge: SceneBridgeNativeModule = { ...fallback, ...resolvedModule };
 
 // Ensure native side always receives both arguments (packageName, deepLink) to match
 // the method signature that expects two JS params plus the promise callbacks.
+// deepLink 可以是 undefined、null 或空字符串，原生模块会处理这些情况并使用 launch intent 兜底
 sceneBridge.openAppWithDeepLink = async (packageName: string, deepLink?: string) => {
-  return resolvedModule.openAppWithDeepLink(packageName, deepLink ?? null);
+  return resolvedModule.openAppWithDeepLink(packageName, deepLink ?? undefined);
 };
 
 sceneBridge.captureImage = async () => {

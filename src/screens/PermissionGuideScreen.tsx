@@ -118,6 +118,17 @@ export const PermissionGuideScreen: React.FC = () => {
         case 'USAGE_STATS':
           hasPermission = await sceneBridge.hasUsageStatsPermission();
           break;
+        case 'CAMERA':
+          hasPermission = await sceneBridge.hasCameraPermission();
+          break;
+        case 'MICROPHONE':
+          // 麦克风权限检查 - 使用通用权限检查
+          hasPermission = await sceneBridge.checkPermission('android.permission.RECORD_AUDIO');
+          break;
+        case 'DO_NOT_DISTURB':
+          // 勿扰模式权限检查
+          hasPermission = await sceneBridge.checkDoNotDisturbPermission();
+          break;
         case 'NOTIFICATIONS':
           hasPermission = true;
           break;
@@ -156,6 +167,25 @@ export const PermissionGuideScreen: React.FC = () => {
             [{ text: '知道了' }]
           );
           break;
+        case 'CAMERA':
+          granted = await sceneBridge.requestCameraPermission();
+          break;
+        case 'MICROPHONE':
+          // 麦克风权限请求
+          granted = await sceneBridge.requestPermission('android.permission.RECORD_AUDIO');
+          break;
+        case 'DO_NOT_DISTURB':
+          // 勿扰模式权限请求 - 引导用户到设置
+          granted = await sceneBridge.openDoNotDisturbSettings();
+          Alert.alert(
+            '勿扰模式权限',
+            '请在设置中找到 SceneLens，授予修改系统设置权限，以便自动开启勿扰模式',
+            [{ text: '知道了' }]
+          );
+          break;
+        case 'NOTIFICATIONS':
+          granted = true;
+          break;
         default:
           Alert.alert('提示', '该权限暂不支持请求');
           return;
@@ -164,7 +194,7 @@ export const PermissionGuideScreen: React.FC = () => {
       setPermissionStatus(type, granted ? 'granted' : 'denied');
 
       if (granted) {
-        Alert.alert('成功', '权限已授予');
+        Alert.alert('成功', '权限已授予或已打开设置');
       } else {
         Alert.alert('提示', '权限被拒绝，部分功能可能无法使用');
       }

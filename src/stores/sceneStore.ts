@@ -15,6 +15,7 @@ interface SceneState {
   isDetecting: boolean;
   lastDetectionTime: number | null;
   detectionError: string | null;
+  isManualMode: boolean; // 是否为手动模式
 
   // Scene history
   history: SceneHistory[];
@@ -26,6 +27,7 @@ interface SceneState {
 
   // Actions
   setCurrentContext: (context: SilentContext) => void;
+  setManualScene: (sceneType: SceneType) => void; // 手动设置场景
   setIsDetecting: (isDetecting: boolean) => void;
   setDetectionError: (error: string | null) => void;
   addToHistory: (historyItem: SceneHistory) => void;
@@ -42,6 +44,7 @@ const initialState = {
   isDetecting: false,
   lastDetectionTime: null,
   detectionError: null,
+  isManualMode: false,
   history: [],
   maxHistorySize: 100,
   autoModeEnabled: false,
@@ -56,7 +59,28 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       currentContext: context,
       lastDetectionTime: Date.now(),
       detectionError: null,
+      isManualMode: false, // 自动检测时重置手动模式
     }),
+
+  setManualScene: (sceneType) =>
+    set((state) => ({
+      currentContext: {
+        timestamp: Date.now(),
+        context: sceneType,
+        confidence: 1.0, // 手动选择置信度为 100%
+        signals: [
+          {
+            type: 'MANUAL' as any,
+            value: `USER_SELECTED_${sceneType}`,
+            weight: 1.0,
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      lastDetectionTime: Date.now(),
+      detectionError: null,
+      isManualMode: true, // 标记为手动模式
+    })),
 
   setIsDetecting: (isDetecting) => set({ isDetecting }),
 

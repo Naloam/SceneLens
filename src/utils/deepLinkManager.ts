@@ -2,7 +2,7 @@
  * DeepLinkManager - Deep Link 优化管理器
  *
  * 职责：
- * - 预加载常用应用信息
+ * - 从 deeplinks.json 加载配置
  * - 优化 Deep Link 解析
  * - 维护 Deep Link 健康状态
  *
@@ -10,7 +10,7 @@
  */
 
 import SceneBridge from '../core/SceneBridge';
-import { appCache, SceneCacheKeyBuilder } from './cacheManager';
+import deeplinksConfig from '../config/deeplinks.json';
 
 /**
  * Deep Link 配置
@@ -22,6 +22,8 @@ export interface DeepLinkConfig {
     action: string;
     url: string;
     priority: number;
+    description?: string;
+    fallback?: string;
   }>;
 }
 
@@ -37,11 +39,31 @@ export interface HealthCheckResult {
 }
 
 /**
+ * JSON 配置中的 Deep Link 条目
+ */
+interface JsonDeepLinkEntry {
+  url: string;
+  description: string;
+  action: string;
+  fallback?: string;
+}
+
+/**
+ * JSON 配置中的应用配置
+ */
+interface JsonAppConfig {
+  packageName: string;
+  name: string;
+  deeplinks: JsonDeepLinkEntry[];
+}
+
+/**
  * Deep Link 管理器类
  */
 export class DeepLinkManager {
   private deepLinkConfigs: Map<string, DeepLinkConfig> = new Map();
   private healthCache: Map<string, HealthCheckResult> = new Map();
+  private fallbackPackages: Record<string, string> = {};
   private isInitialized = false;
 
   /**
@@ -54,8 +76,8 @@ export class DeepLinkManager {
 
     console.log('[DeepLinkManager] Initializing...');
 
-    // 加载内置 Deep Link 配置
-    await this.loadBuiltInConfigs();
+    // 从 deeplinks.json 加载配置
+    this.loadFromJsonConfig();
 
     // 执行初始健康检查（异步执行，不阻塞初始化）
     this.performInitialHealthCheck().catch(error => {
@@ -67,114 +89,43 @@ export class DeepLinkManager {
   }
 
   /**
-   * 加载内置 Deep Link 配置
+   * 从 deeplinks.json 加载配置
    */
-  private async loadBuiltInConfigs(): Promise<void> {
-    const builtInConfigs: DeepLinkConfig[] = [
-      {
-        packageName: 'com.eg.android.AlipayGphone',
-        appName: '支付宝',
-        deepLinks: [
-          {
-            action: 'open_ticket_qr',
-            url: 'alipays://platformapi/startapp?appId=200011235',
-            priority: 1,
-          },
-          {
-            action: 'open_home',
-            url: 'alipays://',
-            priority: 2,
-          },
-        ],
-      },
-      {
-        packageName: 'com.netease.cloudmusic',
-        appName: '网易云音乐',
-        deepLinks: [
-          {
-            action: 'launch_with_playlist',
-            url: 'orpheus://playlist',
-            priority: 1,
-          },
-          {
-            action: 'open_home',
-            url: 'orpheus://',
-            priority: 2,
-          },
-        ],
-      },
-      {
-        packageName: 'com.tencent.wework',
-        appName: '企业微信',
-        deepLinks: [
-          {
-            action: 'open_meeting',
-            url: 'wxwork://',
-            priority: 1,
-          },
-          {
-            action: 'open_home',
-            url: 'wxwork://',
-            priority: 2,
-          },
-        ],
-      },
-      {
-        packageName: 'com.android.calendar',
-        appName: '系统日历',
-        deepLinks: [
-          {
-            action: 'open_calendar',
-            url: 'content://com.android.calendar/events',
-            priority: 1,
-          },
-        ],
-      },
-      {
-        packageName: 'com.xiaomi.smarthome',
-        appName: '米家',
-        deepLinks: [
-          {
-            action: 'open_home',
-            url: 'mjhome://',
-            priority: 1,
-          },
-        ],
-      },
-      {
-        packageName: 'com.MobileTicket',
-        appName: '铁路12306',
-        deepLinks: [
-          {
-            action: 'open_ticket_qr',
-            url: 'ctrip://train',
-            priority: 1,
-          },
-          {
-            action: 'open_home',
-            url: 'mobileticket://',
-            priority: 2,
-          },
-        ],
-      },
-      {
-        packageName: 'camp.firefly.foresto',
-        appName: 'Forest',
-        deepLinks: [
-          {
-            action: 'start_focus',
-            url: 'forest://focus',
-            priority: 1,
-          },
-        ],
-      },
-    ];
+  private loadFromJsonConfig(): void {
+    const { deeplinks, fallbackPackages } = deeplinksConfig;
 
-    for (const config of builtInConfigs) {
-      this.deepLinkConfigs.set(config.packageName, config);
-    }
+    // 保存回退包名配置
+    this.fallbackPackages = fallbackPackages || {};
 
-    console.log(`[DeepLinkManager] Loaded ${builtInConfigs.length} built-in configs`);
+    // 解析各类别下的应用配置
+    let totalApps = 0;
+
+    Object.entries(deeplinks).forEach(([category, apps]) => {
+      Object.entries(apps as Record<string, JsonAppConfig>).forEach(([appKey, appConfig]) => {
+        const config = this.convertJsonToConfig(appConfig);
+        this.deepLinkConfigs.set(config.packageName, config);
+        totalApps++;
+      });
+    });
+
+    console.log(`[DeepLinkManager] Loaded ${totalApps} app configs from deeplinks.json`);
+  }
+
+  /**
+   * 将 JSON 配置转换为内部格式
+   */
+  private convertJsonToConfig(jsonConfig: JsonAppConfig): DeepLinkConfig {
+    return {
+      packageName: jsonConfig.packageName,
+      appName: jsonConfig.name,
+      deepLinks: jsonConfig.deeplinks.map((dl, index) => ({
+        action: dl.action,
+        url: dl.url,
+        priority: index + 1, // 按顺序设置优先级
+        description: dl.description,
+        fallback: dl.fallback,
+      })),
+    };
   }
 
   /**
@@ -199,7 +150,7 @@ export class DeepLinkManager {
         const health = this.healthCache.get(healthKey);
         if (health && !health.isHealthy) {
           console.warn(`[DeepLinkManager] Deep link unhealthy, falling back: ${healthKey}`);
-          // 尝试使用优先级较低的 Deep Link
+          // 尝试使用 open_home 动作
           const fallback = config.deepLinks.find(dl => dl.action === 'open_home');
           return fallback?.url ?? null;
         }
@@ -218,171 +169,154 @@ export class DeepLinkManager {
   }
 
   /**
+   * 通过意图获取包名
+   * 
+   * @param intent 意图类型，如 TRANSIT_APP_TOP1
+   * @returns 包名或 null
+   */
+  getPackageByIntent(intent: string): string | null {
+    return this.fallbackPackages[intent] ?? null;
+  }
+
+  /**
    * 使用 Deep Link 打开应用
    *
    * @param packageName 包名
    * @param deepLink Deep Link URL（可选，会自动查找）
    * @param action 动作类型（可选）
-   * @returns 是否成功
    */
-  async openAppWithDeepLink(
+  async openWithDeepLink(
     packageName: string,
     deepLink?: string,
     action?: string
   ): Promise<boolean> {
+    const url = deepLink ?? this.getDeepLink(packageName, action);
+    if (!url) {
+      console.warn(`[DeepLinkManager] No deep link found for ${packageName}`);
+      return false;
+    }
+
+    console.log(`[DeepLinkManager] Opening ${packageName} with deep link: ${url}`);
+
     try {
-      // 检查应用是否已安装
-      const isInstalled = await SceneBridge.isAppInstalled(packageName);
-      if (!isInstalled) {
-        console.warn(`[DeepLinkManager] App not installed: ${packageName}`);
-        return false;
-      }
-
-      // 确定要使用的 Deep Link
-      const targetLink = deepLink ?? this.getDeepLink(packageName, action);
-      if (!targetLink) {
-        console.warn(`[DeepLinkManager] No deep link found for ${packageName}`);
-        return false;
-      }
-
-      // 尝试打开
-      const success = await SceneBridge.openAppWithDeepLink(packageName, targetLink);
-      if (success) {
-        // 更新健康状态
-        this.updateHealthStatus(packageName, targetLink, true);
-        return true;
-      }
-
-      // 失败时更新健康状态
-      this.updateHealthStatus(packageName, targetLink, false, 'Launch failed');
-
-      // 尝试降级到首页
-      if (action && action !== 'open_home') {
-        const homeLink = this.getDeepLink(packageName, 'open_home');
-        if (homeLink && homeLink !== targetLink) {
-          console.log(`[DeepLinkManager] Falling back to home link for ${packageName}`);
-          const fallbackSuccess = await SceneBridge.openAppWithDeepLink(packageName, homeLink);
-          this.updateHealthStatus(packageName, homeLink, fallbackSuccess, fallbackSuccess ? undefined : 'Fallback failed');
-          return fallbackSuccess;
-        }
-      }
-
-      return false;
+      const result = await SceneBridge.openAppWithDeepLink(packageName, url);
+      return result;
     } catch (error) {
-      console.error(`[DeepLinkManager] Error opening app ${packageName}:`, error);
-      if (deepLink) {
-        this.updateHealthStatus(packageName, deepLink, false, error instanceof Error ? error.message : String(error));
-      }
+      console.error(`[DeepLinkManager] Failed to open ${packageName}:`, error);
+      // 标记为不健康
+      this.markUnhealthy(packageName, url, String(error));
       return false;
     }
   }
 
   /**
-   * 解析意图为包名（带缓存优化）
-   *
-   * @param intent 意图字符串
-   * @returns 包名或 null
+   * 获取所有已配置的应用
    */
-  resolveIntentWithCache(intent: string): string | null {
-    const cacheKey = SceneCacheKeyBuilder.buildAppIntentKey(intent);
-
-    // 尝试从缓存获取
-    const cached = appCache.get<string>(cacheKey);
-    if (cached !== null) {
-      return cached;
-    }
-
-    // 简单的意图解析
-    const match = intent.match(/^(\w+)_TOP(\d+)$/);
-    if (!match) {
-      return null;
-    }
-
-    const [, category, index] = match;
-    const idx = parseInt(index) - 1;
-
-    // 兜底映射（可由 AppDiscoveryEngine 覆盖）
-    const fallbackMap: Record<string, string[]> = {
-      MUSIC_PLAYER: ['com.netease.cloudmusic', 'com.tencent.qqmusic'],
-      TRANSIT_APP: ['com.eg.android.AlipayGphone', 'com.autonavi.minimap'],
-      MEETING_APP: ['com.tencent.wework', 'com.ss.android.lark'],
-      STUDY_APP: ['camp.firefly.foresto', 'com.duolingo'],
-      CALENDAR: ['com.android.calendar', 'com.google.android.calendar'],
-      SMART_HOME: ['com.xiaomi.smarthome', 'com.yeelight.cherry'],
-      TRAVEL_APP: ['com.MobileTicket', 'com.ctrip.ctrip'],
-      PAYMENT_APP: ['com.eg.android.AlipayGphone', 'com.tencent.mm'],
-    };
-
-    const candidates = fallbackMap[category];
-    const packageName = candidates?.[idx] ?? null;
-
-    // 缓存结果
-    if (packageName) {
-      appCache.set(cacheKey, packageName);
-    }
-
-    return packageName;
+  getAllConfigs(): DeepLinkConfig[] {
+    return Array.from(this.deepLinkConfigs.values());
   }
 
   /**
-   * 执行初始健康检查（异步）
+   * 获取指定类别的应用
+   */
+  getConfigsByCategory(category: string): DeepLinkConfig[] {
+    const categoryApps = (deeplinksConfig.deeplinks as Record<string, Record<string, JsonAppConfig>>)[category];
+    if (!categoryApps) {
+      return [];
+    }
+
+    return Object.values(categoryApps)
+      .map(appConfig => this.deepLinkConfigs.get(appConfig.packageName))
+      .filter((config): config is DeepLinkConfig => config !== undefined);
+  }
+
+  /**
+   * 检查应用是否已配置
+   */
+  hasConfig(packageName: string): boolean {
+    return this.deepLinkConfigs.has(packageName);
+  }
+
+  /**
+   * 获取应用配置
+   */
+  getConfig(packageName: string): DeepLinkConfig | undefined {
+    return this.deepLinkConfigs.get(packageName);
+  }
+
+  /**
+   * 执行初始健康检查
    */
   private async performInitialHealthCheck(): Promise<void> {
-    const criticalApps = [
-      { packageName: 'com.eg.android.AlipayGphone', deepLink: 'alipays://platformapi/startapp?appId=200011235' },
-      { packageName: 'com.netease.cloudmusic', deepLink: 'orpheus://' },
-      { packageName: 'com.android.calendar', deepLink: 'content://com.android.calendar/events' },
-    ];
+    console.log('[DeepLinkManager] Starting initial health check...');
 
-    console.log('[DeepLinkManager] Performing initial health check...');
+    const configs = Array.from(this.deepLinkConfigs.values());
+    const checkPromises: Promise<void>[] = [];
 
-    for (const app of criticalApps) {
-      try {
-        const isValid = await this.validateDeepLink(app.deepLink);
-        this.updateHealthStatus(app.packageName, app.deepLink, isValid);
-      } catch (error) {
-        console.warn(`[DeepLinkManager] Health check failed for ${app.packageName}:`, error);
-        this.updateHealthStatus(app.packageName, app.deepLink, false, 'Validation failed');
+    for (const config of configs) {
+      for (const dl of config.deepLinks) {
+        checkPromises.push(
+          this.checkDeepLinkHealth(config.packageName, dl.url).then(() => {})
+        );
       }
+    }
+
+    // 限制并发数量
+    const batchSize = 5;
+    for (let i = 0; i < checkPromises.length; i += batchSize) {
+      const batch = checkPromises.slice(i, i + batchSize);
+      await Promise.all(batch);
     }
 
     console.log('[DeepLinkManager] Initial health check complete');
   }
 
   /**
-   * 验证 Deep Link 有效性
-   *
-   * @param deepLink Deep Link URL
-   * @returns 是否有效
+   * 检查单个 Deep Link 的健康状态
    */
-  private async validateDeepLink(deepLink: string): Promise<boolean> {
+  private async checkDeepLinkHealth(packageName: string, deepLink: string): Promise<boolean> {
+    const healthKey = this.getHealthKey(packageName, deepLink);
+
     try {
-      return await SceneBridge.validateDeepLink(deepLink);
+      // 检查应用是否安装
+      const isInstalled = await SceneBridge.isAppInstalled(packageName);
+
+      const result: HealthCheckResult = {
+        packageName,
+        deepLink,
+        isHealthy: isInstalled,
+        lastChecked: Date.now(),
+      };
+
+      if (!isInstalled) {
+        result.error = 'App not installed';
+      }
+
+      this.healthCache.set(healthKey, result);
+      return isInstalled;
     } catch (error) {
-      console.warn(`[DeepLinkManager] Deep link validation failed:`, error);
+      const result: HealthCheckResult = {
+        packageName,
+        deepLink,
+        isHealthy: false,
+        error: String(error),
+        lastChecked: Date.now(),
+      };
+
+      this.healthCache.set(healthKey, result);
       return false;
     }
   }
 
   /**
-   * 更新健康状态
-   *
-   * @param packageName 包名
-   * @param deepLink Deep Link URL
-   * @param isHealthy 是否健康
-   * @param error 错误信息（可选）
+   * 标记 Deep Link 为不健康
    */
-  private updateHealthStatus(
-    packageName: string,
-    deepLink: string,
-    isHealthy: boolean,
-    error?: string
-  ): void {
+  private markUnhealthy(packageName: string, deepLink: string, error: string): void {
     const healthKey = this.getHealthKey(packageName, deepLink);
     this.healthCache.set(healthKey, {
       packageName,
       deepLink,
-      isHealthy,
+      isHealthy: false,
       error,
       lastChecked: Date.now(),
     });
@@ -390,41 +324,35 @@ export class DeepLinkManager {
 
   /**
    * 生成健康检查缓存键
-   *
-   * @param packageName 包名
-   * @param deepLink Deep Link URL
-   * @returns 缓存键
    */
   private getHealthKey(packageName: string, deepLink: string): string {
-    return `${packageName}_${deepLink}`;
+    return `${packageName}:${deepLink}`;
   }
 
   /**
-   * 获取健康检查统计
-   *
-   * @returns 健康检查结果数组
+   * 获取健康检查报告
    */
-  getHealthStats(): HealthCheckResult[] {
+  getHealthReport(): HealthCheckResult[] {
     return Array.from(this.healthCache.values());
   }
 
   /**
-   * 检查是否已初始化
+   * 清除健康缓存
    */
-  isReady(): boolean {
-    return this.isInitialized;
+  clearHealthCache(): void {
+    this.healthCache.clear();
   }
 
   /**
-   * 清除所有缓存
+   * 刷新所有健康状态
    */
-  clearCache(): void {
-    this.healthCache.clear();
-    console.log('[DeepLinkManager] Cache cleared');
+  async refreshHealth(): Promise<void> {
+    this.clearHealthCache();
+    await this.performInitialHealthCheck();
   }
 }
 
 // 导出单例实例
 export const deepLinkManager = new DeepLinkManager();
 
-export default deepLinkManager;
+export default DeepLinkManager;

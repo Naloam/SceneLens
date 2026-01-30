@@ -194,6 +194,12 @@ export class SilentContextEngine {
         return 'OFFICE';
       case 'SUBWAY_STATION':
         return 'SUBWAY_STATION';
+      case 'TRAIN_STATION':
+        return 'TRAIN_STATION';
+      case 'AIRPORT':
+        return 'AIRPORT';
+      case 'LIBRARY':
+        return 'LIBRARY';
       default:
         return null;
     }
@@ -208,7 +214,7 @@ export class SilentContextEngine {
    */
   async getContext(): Promise<SilentContext> {
     const now = Date.now();
-    const signalTypes: SignalType[] = ['TIME'];
+    const signalTypes: SignalType[] = ['TIME', 'BATTERY', 'SCREEN'];
 
     // 检查位置权限
     const hasLocation = await this.hasLocationPermission();
@@ -217,6 +223,10 @@ export class SilentContextEngine {
 
     const hasUsageStats = await this.hasUsageStatsPermission();
     if (hasUsageStats) signalTypes.push('FOREGROUND_APP');
+
+    // 检查日历权限
+    const hasCalendar = await this.hasCalendarPermission();
+    if (hasCalendar) signalTypes.push('CALENDAR');
 
     // 生成缓存键
     const cacheKey = SceneCacheKeyBuilder.build(now, signalTypes);
@@ -260,6 +270,26 @@ export class SilentContextEngine {
       if (appSignal) {
         signals.push(appSignal);
       }
+    }
+
+    // 日历信号（新增）
+    if (hasCalendar) {
+      const calendarSignal = await this.getCalendarSignal();
+      if (calendarSignal) {
+        signals.push(calendarSignal);
+      }
+    }
+
+    // 电池状态信号（新增）
+    const batterySignal = await this.getBatterySignal();
+    if (batterySignal) {
+      signals.push(batterySignal);
+    }
+
+    // 屏幕状态信号（新增）
+    const screenSignal = await this.getScreenSignal();
+    if (screenSignal) {
+      signals.push(screenSignal);
     }
 
     // 场景推断
@@ -621,19 +651,38 @@ export class SilentContextEngine {
     let matchedConditions = 0;
     const signalTypes = new Set<string>();
     let totalEffectiveWeight = 0;
+    let strongSignalCount = 0; // 强信号计数（位置、WiFi 明确匹配）
 
     // 遍历所有信号，累加场景得分
     for (const signal of signals) {
       signalTypes.add(signal.type);
       const sceneMapping = this.signalToScenes(signal);
 
-      // 对于未知位置/WiFi，降低权重影响
+      // 判断信号强度
+      const isStrongSignal = 
+        (signal.type === 'LOCATION' && !signal.value.includes('UNKNOWN')) ||
+        (signal.type === 'WIFI' && !signal.value.includes('UNKNOWN'));
+      
+      const isTimeSignal = signal.type === 'TIME';
+      const isUnknownSignal = signal.value.includes('UNKNOWN');
+
+      // 计算有效权重
       let effectiveWeight = signal.weight;
-      if (signal.value.includes('UNKNOWN') || signal.type === 'LOCATION' || signal.type === 'WIFI') {
-        // 如果位置或WiFi未知，权重减半但不完全忽略
-        effectiveWeight = signal.weight * 0.5;
+      
+      if (isStrongSignal) {
+        // 明确的位置/WiFi 信号，权重提升
+        effectiveWeight = signal.weight * 1.2;
+        strongSignalCount++;
+        matchedConditions++;
+      } else if (isTimeSignal) {
+        // 时间信号始终有效
+        effectiveWeight = signal.weight;
+        matchedConditions++;
+      } else if (isUnknownSignal) {
+        // 未知信号，降低权重但不影响整体计算
+        effectiveWeight = signal.weight * 0.3;
       } else {
-        // 明确匹配的信号计入匹配条件数
+        // 其他信号正常处理
         matchedConditions++;
       }
 
@@ -662,27 +711,44 @@ export class SilentContextEngine {
     // 智能置信度调整
     let confidence = rawConfidence;
 
-    // 计算满足条件的比例（相对于总信号数）
-    const conditionRatio = signalTypes.size > 0 ? matchedConditions / signalTypes.size : 0;
-
-    // 根据满足条件的数量调整置信度
-    if (matchedConditions >= signalTypes.size * 0.7) {
-      // 大部分条件满足，提高置信度
-      confidence = Math.min(rawConfidence * 1.3, 0.95);
+    // 根据信号质量调整置信度
+    if (strongSignalCount >= 1) {
+      // 有明确的位置/WiFi 信号，大幅提升置信度
+      confidence = Math.min(rawConfidence * 1.5, 0.95);
     } else if (matchedConditions >= 2) {
-      // 至少两个条件满足，给予中等置信度提升
-      confidence = Math.min(rawConfidence * 1.15, 0.85);
-    } else if (matchedConditions === 1 && signalTypes.has('TIME')) {
-      // 只有时间信号匹配，给予基础置信度
-      confidence = Math.max(rawConfidence, 0.45);
+      // 多个信号匹配，提升置信度
+      confidence = Math.min(rawConfidence * 1.3, 0.85);
+    } else if (matchedConditions === 1) {
+      // 只有一个信号匹配（通常是时间），给予基础置信度
+      confidence = Math.max(rawConfidence * 1.2, 0.55);
     }
 
-    // 确保最低置信度（时间信号总是可用的）
-    confidence = Math.max(confidence, 0.35);
+    // 确保最低置信度为 0.5（让用户看到有意义的结果）
+    confidence = Math.max(confidence, 0.5);
+
+    // 如果是 UNKNOWN 场景但有时间信号，尝试根据时间推断一个更具体的场景
+    if (bestScene === 'UNKNOWN' && signalTypes.has('TIME')) {
+      // 找到第二高分的非 UNKNOWN 场景
+      let secondMaxScore = 0;
+      let secondBestScene: SceneType = 'HOME'; // 默认家
+      
+      for (const [scene, score] of sceneScores) {
+        if (scene !== 'UNKNOWN' && score > secondMaxScore) {
+          secondMaxScore = score;
+          secondBestScene = scene;
+        }
+      }
+      
+      // 如果第二高分场景有一定得分，使用它
+      if (secondMaxScore > 0) {
+        bestScene = secondBestScene;
+        confidence = Math.max(confidence * 0.8, 0.5);
+      }
+    }
 
     // 调试日志
     console.log(`[SilentContextEngine] Scene: ${bestScene}, Confidence: ${confidence.toFixed(2)}`);
-    console.log(`[SilentContextEngine] Signals: ${signals.length}, Matched: ${matchedConditions}, Ratio: ${conditionRatio.toFixed(2)}`);
+    console.log(`[SilentContextEngine] Signals: ${signals.length}, Matched: ${matchedConditions}, StrongSignals: ${strongSignalCount}`);
     console.log(`[SilentContextEngine] Scores:`, Object.fromEntries(sceneScores));
 
     return {
@@ -1054,6 +1120,43 @@ export class SilentContextEngine {
   }
 
   /**
+   * 批量设置位置围栏（用于测试）
+   * 支持两种格式：
+   * 1. 数组格式：[{ type, latitude, longitude, radius }, ...]
+   * 2. 对象格式：{ HOME: { latitude, longitude, radius }, ... }
+   * 
+   * @param fences 围栏配置
+   */
+  setGeoFences(
+    fences: 
+      | Array<{ type: LocationType; latitude: number; longitude: number; radius: number }>
+      | Record<string, { latitude: number; longitude: number; radius: number }>
+  ): void {
+    if (Array.isArray(fences)) {
+      fences.forEach(fence => {
+        this.geoFences.set(fence.type, { 
+          latitude: fence.latitude, 
+          longitude: fence.longitude, 
+          radius: fence.radius 
+        });
+      });
+    } else {
+      // 对象格式
+      Object.entries(fences).forEach(([type, coords]) => {
+        this.geoFences.set(type as LocationType, coords);
+      });
+    }
+  }
+
+  /**
+   * 清除缓存（用于测试）
+   */
+  clearCache(): void {
+    this.signalCache.clear();
+    sceneCache.clear();
+  }
+
+  /**
    * 设置已知 WiFi 映射
    * 
    * @param ssid WiFi SSID
@@ -1091,6 +1194,174 @@ export class SilentContextEngine {
    */
   getSamplingIntervals(): SamplingIntervals {
     return { ...this.samplingIntervals };
+  }
+
+  // ==================== 新增：日历、电池、屏幕信号 ====================
+
+  /**
+   * 检查是否有日历权限
+   */
+  private async hasCalendarPermission(): Promise<boolean> {
+    try {
+      return await sceneBridge.hasCalendarPermission();
+    } catch (error) {
+      console.warn('Failed to check calendar permission:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 获取日历信号
+   * 
+   * 检查即将到来的日历事件，用于：
+   * - 会议场景识别（有即将开始的会议）
+   * - 出行场景识别（有行程安排）
+   * 
+   * @returns 日历上下文信号或 null
+   */
+  private async getCalendarSignal(): Promise<ContextSignal | null> {
+    try {
+      // 获取未来 2 小时内的日历事件
+      const events = await sceneBridge.getUpcomingEvents(2);
+
+      if (!events || events.length === 0) {
+        return null;
+      }
+
+      // 分析最近的事件
+      const now = Date.now();
+      const upcomingEvent = events[0];
+      const timeUntilEvent = upcomingEvent.startTime - now;
+      const minutesUntilEvent = timeUntilEvent / (60 * 1000);
+
+      // 判断事件类型
+      let eventType = 'EVENT';
+      const titleLower = upcomingEvent.title.toLowerCase();
+      const locationLower = (upcomingEvent.location || '').toLowerCase();
+
+      // 会议类型检测
+      if (titleLower.includes('会议') || 
+          titleLower.includes('meeting') ||
+          titleLower.includes('电话') ||
+          titleLower.includes('call') ||
+          titleLower.includes('面试') ||
+          titleLower.includes('interview')) {
+        eventType = 'MEETING';
+      }
+      // 出行类型检测
+      else if (titleLower.includes('航班') || 
+               titleLower.includes('flight') ||
+               titleLower.includes('火车') ||
+               titleLower.includes('train') ||
+               titleLower.includes('高铁') ||
+               locationLower.includes('机场') ||
+               locationLower.includes('airport') ||
+               locationLower.includes('火车站') ||
+               locationLower.includes('station')) {
+        eventType = 'TRAVEL';
+      }
+
+      // 根据距离事件开始的时间调整权重
+      let weight = 0.5;
+      if (minutesUntilEvent <= 15) {
+        weight = 0.9; // 15分钟内，高权重
+      } else if (minutesUntilEvent <= 30) {
+        weight = 0.8; // 30分钟内
+      } else if (minutesUntilEvent <= 60) {
+        weight = 0.6; // 1小时内
+      }
+
+      // 返回信号值格式：事件类型_距离时间
+      const timeLabel = minutesUntilEvent <= 15 ? 'IMMINENT' : 
+                       minutesUntilEvent <= 30 ? 'SOON' : 'UPCOMING';
+
+      return {
+        type: 'CALENDAR',
+        value: `${eventType}_${timeLabel}`,
+        weight,
+        timestamp: now,
+      };
+    } catch (error) {
+      console.warn('Failed to get calendar signal:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 获取电池状态信号
+   * 
+   * 用于：
+   * - 睡眠场景识别（充电中 + 深夜）
+   * - 低电量提醒
+   * 
+   * @returns 电池上下文信号或 null
+   */
+  private async getBatterySignal(): Promise<ContextSignal | null> {
+    try {
+      const batteryStatus = await sceneBridge.getBatteryStatus();
+
+      if (!batteryStatus) {
+        return null;
+      }
+
+      let value: string;
+      let weight = 0.4;
+
+      if (batteryStatus.isCharging) {
+        if (batteryStatus.isFull || batteryStatus.batteryLevel >= 100) {
+          value = 'CHARGING_FULL';
+          weight = 0.6;
+        } else {
+          value = 'CHARGING';
+          weight = 0.5;
+        }
+      } else {
+        if (batteryStatus.batteryLevel <= 20) {
+          value = 'LOW';
+          weight = 0.3;
+        } else if (batteryStatus.batteryLevel <= 50) {
+          value = 'MEDIUM';
+          weight = 0.2;
+        } else {
+          value = 'HIGH';
+          weight = 0.2;
+        }
+      }
+
+      return {
+        type: 'BATTERY',
+        value,
+        weight,
+        timestamp: Date.now(),
+      };
+    } catch (error) {
+      console.warn('Failed to get battery signal:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 获取屏幕状态信号
+   * 
+   * 用于：
+   * - 睡眠场景识别（屏幕熄灭 + 充电中 + 深夜）
+   * 
+   * @returns 屏幕上下文信号或 null
+   */
+  private async getScreenSignal(): Promise<ContextSignal | null> {
+    try {
+      const isScreenOn = await sceneBridge.isScreenOn();
+
+      return {
+        type: 'SCREEN',
+        value: isScreenOn ? 'ON' : 'OFF',
+        weight: isScreenOn ? 0.2 : 0.5, // 屏幕熄灭时权重更高（可能在睡眠）
+        timestamp: Date.now(),
+      };
+    } catch (error) {
+      console.warn('Failed to get screen signal:', error);
+      return null;
+    }
   }
 }
 

@@ -77,6 +77,9 @@ export type GeoFenceType =
   | 'HOME'           // 家
   | 'OFFICE'         // 办公室
   | 'SUBWAY_STATION' // 地铁站
+  | 'TRAIN_STATION'  // 火车站
+  | 'AIRPORT'        // 机场
+  | 'LIBRARY'        // 图书馆
   | 'CUSTOM';        // 自定义
 
 /**
@@ -483,6 +486,12 @@ export interface SceneSuggestionPackage {
   appLaunches: AppLaunch[];
   oneTapActions: OneTapAction[];
   fallbackNotes: FallbackNote[];
+  /** 动态建议笔记（来自 AI 动态建议服务） */
+  dynamicNotes?: string[];
+  /** 动态问候语（来自 AI 动态建议服务） */
+  dynamicGreeting?: string;
+  /** 动态提示（来自 AI 动态建议服务） */
+  dynamicTip?: string;
 }
 
 /**

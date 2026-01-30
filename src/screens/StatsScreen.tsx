@@ -16,6 +16,7 @@ import {
   ProgressBar,
 } from 'react-native-paper';
 import { useSceneStore, SceneHistory } from '../stores';
+import { useShallow } from 'zustand/react/shallow';
 import { getSceneColor, getSceneContainerColor } from '../theme/colors';
 import { spacing } from '../theme/spacing';
 import type { SceneType } from '../types';
@@ -62,7 +63,9 @@ const sceneNames: Record<string, string> = {
 
 export const StatsScreen: React.FC = () => {
   const theme = useTheme();
-  const { history } = useSceneStore();
+  const { history } = useSceneStore(
+    useShallow(state => ({ history: state.history }))
+  );
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('today');
 
   /**
