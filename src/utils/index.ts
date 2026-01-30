@@ -8,3 +8,15 @@ export { CacheManager, SceneCacheKeyBuilder, sceneCache, ruleCache, appCache } f
 export { DeepLinkManager, deepLinkManager } from './deepLinkManager';
 export { ErrorHandler, FallbackManager, errorHandler, fallbackManager } from './errorHandler';
 export * from './diagnostics';
+export { 
+  PermissionManager, 
+  permissionManager, 
+  PermissionType, 
+  PermissionStatus,
+  PERMISSION_GROUPS,
+} from './PermissionManager';
+export type { 
+  PermissionGroup,
+  PermissionCheckResult, 
+  BatchPermissionResult 
+} from './PermissionManager';

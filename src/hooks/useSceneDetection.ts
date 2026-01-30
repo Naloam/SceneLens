@@ -180,8 +180,9 @@ export function useSceneDetection(): UseSceneDetectionReturn {
       // 获取场景建议包
       await loadSceneSuggestion(context);
 
-      // 执行场景动作
-      await executeSceneActions(context);
+      // 注意：不再自动执行场景动作，而是等待用户确认
+      // 如需自动执行，用户需要在设置中启用
+      // await executeSceneActions(context);
 
       // 显示通知（如果置信度足够高）
       if (context.confidence > 0.5) {

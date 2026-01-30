@@ -14,6 +14,13 @@ import { silentContextEngine } from '../core/SilentContextEngine';
 import { ruleEngine } from '../rules/RuleEngine';
 import { predictiveTrigger } from '../core/PredictiveTrigger';
 import { notificationManager } from '../notifications/NotificationManager';
+import { proactiveReminder } from '../notifications/ProactiveReminder';
+import { smartNotificationFilter } from '../notifications/SmartNotificationFilter';
+import { quickActionManager } from '../quickactions/QuickActionManager';
+import { preferenceManager } from '../learning/PreferenceManager';
+import { appUsageTracker } from '../learning/AppUsageTracker';
+import { feedbackProcessor } from '../learning/FeedbackProcessor';
+import { contextPredictor } from '../prediction/ContextPredictor';
 import type { SilentContext, SceneType } from '../types';
 
 /**
@@ -65,6 +72,7 @@ export class BackgroundService {
   private appStateSubscription: any = null;
   private isInForeground: boolean = true;
   private detectionCount: number = 0;
+  private lastSceneType: SceneType = 'UNKNOWN';
 
   /**
    * 初始化后台服务
@@ -80,6 +88,27 @@ export class BackgroundService {
 
     // 初始化通知管理器
     await notificationManager.initialize();
+    
+    // 初始化主动提醒引擎
+    await proactiveReminder.initialize();
+    
+    // 初始化快捷操作管理器
+    await quickActionManager.initialize();
+    
+    // 初始化偏好管理器
+    await preferenceManager.initialize();
+    
+    // 初始化应用使用追踪器
+    await appUsageTracker.initialize();
+    
+    // 初始化反馈处理器
+    await feedbackProcessor.initialize();
+    
+    // 初始化智能通知过滤器
+    await smartNotificationFilter.initialize();
+    
+    // 初始化上下文预测器
+    await contextPredictor.initialize();
 
     console.log('[BackgroundService] Initialized');
   }
@@ -181,6 +210,9 @@ export class BackgroundService {
       this.appStateSubscription.remove();
       this.appStateSubscription = null;
     }
+    
+    // 停止主动提醒引擎
+    proactiveReminder.stop();
 
     console.log('[BackgroundService] Destroyed');
   }
@@ -307,6 +339,23 @@ export class BackgroundService {
 
       // 检查是否应该触发
       const decision = predictiveTrigger.shouldTrigger(context);
+      
+      // 检查场景是否变化，触发主动提醒
+      if (this.lastSceneType !== context.context) {
+        const oldScene = this.lastSceneType;
+        this.lastSceneType = context.context;
+        
+        // 触发主动提醒
+        await proactiveReminder.onSceneChange(oldScene, context.context);
+        
+        // 更新智能通知过滤器的场景
+        smartNotificationFilter.setCurrentScene(context.context);
+        
+        // 记录场景变化到预测引擎
+        await contextPredictor.onSceneChange(context.context, context.confidence, oldScene);
+        
+        console.log(`[BackgroundService] Scene changed: ${oldScene} -> ${context.context}`);
+      }
 
       const result: DetectionResult = {
         context,

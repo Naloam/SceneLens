@@ -6,3 +6,12 @@
 
 export * from './AppUsageTracker';
 export { default as appUsageTracker } from './AppUsageTracker';
+
+export * from './PreferenceManager';
+export { default as preferenceManager } from './PreferenceManager';
+
+export * from './HabitDiscovery';
+export { default as habitDiscovery } from './HabitDiscovery';
+
+export * from './FeedbackProcessor';
+export { default as feedbackProcessor } from './FeedbackProcessor';

@@ -26,6 +26,9 @@ import {
   Dialog,
   Button,
 } from 'react-native-paper';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../App';
 import { useSettingsStore, themeColors, type ThemeColor, type NotificationStyle, type DetectionInterval } from '../stores/settingsStore';
 import { storageManager } from '../stores/storageManager';
 
@@ -154,11 +157,14 @@ const ConfidenceSlider: React.FC<{
   );
 };
 
+type SettingsNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
+
 /**
  * 主设置页面
  */
 export const SettingsScreen: React.FC = () => {
   const theme = useTheme();
+  const navigation = useNavigation<SettingsNavigationProp>();
   const {
     settings,
     isLoading,
@@ -290,6 +296,59 @@ export const SettingsScreen: React.FC = () => {
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       contentContainerStyle={styles.contentContainer}
     >
+      {/* 场景与自动化 */}
+      <Card style={styles.card}>
+        <List.Subheader style={styles.cardHeader}>场景与自动化</List.Subheader>
+
+        <List.Item
+          title="场景配置"
+          description="配置各场景的首选应用和触发条件"
+          left={(props) => <List.Icon {...props} icon="cog-outline" />}
+          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          onPress={() => navigation.navigate('SceneConfig')}
+        />
+
+        <Divider />
+
+        <List.Item
+          title="自动化规则"
+          description="创建和管理场景触发的自动化规则"
+          left={(props) => <List.Icon {...props} icon="robot" />}
+          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          onPress={() => navigation.navigate('RuleEditor')}
+        />
+
+        <Divider />
+
+        <List.Item
+          title="位置配置"
+          description="设置家、公司等常用位置的地理围栏"
+          left={(props) => <List.Icon {...props} icon="map-marker" />}
+          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          onPress={() => navigation.navigate('LocationConfig')}
+        />
+
+        <Divider />
+
+        <List.Item
+          title="会议场景配置"
+          description="配置日历集成和会议检测规则"
+          left={(props) => <List.Icon {...props} icon="calendar-clock" />}
+          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          onPress={() => navigation.navigate('MeetingConfig')}
+        />
+
+        <Divider />
+
+        <List.Item
+          title="权限管理"
+          description="管理应用所需的各项系统权限"
+          left={(props) => <List.Icon {...props} icon="shield-check" />}
+          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          onPress={() => navigation.navigate('Permissions')}
+        />
+      </Card>
+
       {/* 外观设置 */}
       <Card style={styles.card}>
         <List.Subheader style={styles.cardHeader}>外观设置</List.Subheader>
@@ -345,6 +404,16 @@ export const SettingsScreen: React.FC = () => {
             </View>
           </>
         )}
+        
+        <Divider />
+        
+        <List.Item
+          title="智能通知过滤"
+          description="根据场景自动过滤不重要的通知"
+          left={(props) => <List.Icon {...props} icon="filter" />}
+          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          onPress={() => navigation.navigate('NotificationFilter')}
+        />
       </Card>
 
       {/* 高级设置 */}
@@ -452,7 +521,7 @@ export const SettingsScreen: React.FC = () => {
         <List.Item
           title="发送反馈"
           description="报告问题或提出建议"
-          left={(props) => <List.Icon {...props} icon="feedback" />}
+          left={(props) => <List.Icon {...props} icon="message-draw" />}
           onPress={sendFeedback}
         />
       </Card>

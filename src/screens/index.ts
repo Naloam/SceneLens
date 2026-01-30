@@ -9,3 +9,6 @@ export { PermissionGuideScreen } from './PermissionGuideScreen';
 export { MeetingConfigScreen } from './MeetingConfigScreen';
 export { StatsScreen } from './StatsScreen';
 export { SettingsScreen } from './SettingsScreen';
+export { NotificationFilterScreen } from './NotificationFilterScreen';
+export { RuleEditorScreen } from './RuleEditorScreen';
+export { PermissionsScreen } from './PermissionsScreen';

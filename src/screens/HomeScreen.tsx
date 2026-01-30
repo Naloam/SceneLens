@@ -22,8 +22,10 @@ import { useSceneStore } from '../stores';
 import { useShallow } from 'zustand/react/shallow';
 import { sceneSuggestionManager } from '../services/SceneSuggestionManager';
 import { predictiveTrigger } from '../core/PredictiveTrigger';
+import { feedbackProcessor } from '../learning/FeedbackProcessor';
 import { spacing } from '../theme/spacing';
 import SceneSuggestionCard from '../components/ui/SceneSuggestionCard';
+import { QuickActionsPanel } from '../components/quickactions/QuickActionsPanel';
 
 // Hooks
 import {
@@ -41,6 +43,8 @@ import {
   HistoryCard,
   SuggestionDialog,
   SceneSelector,
+  PredictionCard,
+  FeedbackReportCard,
 } from '../components/home';
 
 import type { SceneSuggestionPackage, SuggestionExecutionResult, SceneHistory, TriggeredContext, SceneType } from '../types';
@@ -243,6 +247,19 @@ export const HomeScreen: React.FC = () => {
     });
 
     predictiveTrigger.recordFeedback(result.sceneId, result.success ? 'accept' : 'cancel');
+    
+    // 记录到反馈处理器（Phase 3）
+    feedbackProcessor.recordFeedback(
+      {
+        id: result.sceneId,
+        type: 'SCENE_ACTION',
+        scene: (result.sceneId as SceneType) || 'UNKNOWN',
+        title: '场景建议',
+        content: `执行 ${result.executedActions.length} 项操作`,
+        confidence: currentContext?.confidence ?? 0.7,
+      },
+      result.success ? 'ACCEPT' : 'IGNORE'
+    );
 
     const successCount = result.executedActions.filter(a => a.success).length;
     const totalCount = result.executedActions.length;
@@ -361,6 +378,18 @@ export const HomeScreen: React.FC = () => {
         onSwitchScene={() => setSceneSelectorVisible(true)}
       />
 
+      {/* 智能预测卡片（Phase 3） */}
+      <PredictionCard
+        currentScene={currentContext?.context || 'UNKNOWN'}
+        onPredictionTap={(prediction) => {
+          console.log('[HomeScreen] Prediction tapped:', prediction);
+        }}
+        onDepartureReminderTap={(reminder) => {
+          console.log('[HomeScreen] Departure reminder tapped:', reminder);
+          Alert.alert('出发提醒', reminder.message);
+        }}
+      />
+
       {/* 场景执行建议包卡片 */}
       {sceneSuggestion && (
         <SceneSuggestionCard
@@ -370,10 +399,29 @@ export const HomeScreen: React.FC = () => {
         />
       )}
 
+      {/* 快捷操作面板 */}
+      <QuickActionsPanel
+        currentScene={currentContext?.context || 'UNKNOWN'}
+        maxActions={6}
+        layout="grid"
+        showTitle={true}
+        title="快捷操作"
+        onActionExecuted={(action, success) => {
+          console.log('[HomeScreen] Quick action executed:', action.id, success);
+        }}
+      />
+
       {/* 场景历史列表 */}
       <HistoryCard
         history={recentHistory}
         onShowDetail={showHistoryDetail}
+      />
+
+      {/* 学习报告卡片（Phase 3） */}
+      <FeedbackReportCard
+        onViewDetails={() => {
+          console.log('[HomeScreen] View feedback report details');
+        }}
       />
 
       {/* 建议弹窗 */}

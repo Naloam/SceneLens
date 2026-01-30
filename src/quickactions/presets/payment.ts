@@ -8,6 +8,7 @@ import type { QuickAction } from '../../types/automation';
 
 /**
  * 微信支付快捷操作
+ * 使用 weixin://biz/paycode 打开微信付款码页面
  */
 export const wechatPayAction: QuickAction = {
   id: 'wechat_pay',
@@ -18,7 +19,8 @@ export const wechatPayAction: QuickAction = {
   actionType: 'deep_link',
   actionParams: {
     shortcutId: 'wechat_pay',
-    uri: 'weixin://scanqrcode',
+    // 使用 biz/paycode 打开付款码，比 scanqrcode 更适合支付场景
+    uri: 'weixin://biz/paycode',
   },
   contextTriggers: {
     scenes: ['UNKNOWN'],

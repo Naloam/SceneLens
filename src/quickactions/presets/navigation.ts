@@ -29,16 +29,21 @@ export const amapNavigationAction: QuickAction = {
 
 /**
  * 高德地图回家导航
+ * 注意：使用 route 模式（路线规划）而非 navi 模式（直接导航）
+ * 这样即使没有预设地址，也能打开地图让用户选择目的地
  */
 export const amapHomeNavigationAction: QuickAction = {
   id: 'amap_home',
   name: '导航回家',
-  description: '使用高德地图导航回家',
+  description: '使用高德地图导航回家（需要在设置中配置家庭地址）',
   icon: 'home',
   category: 'navigation',
   actionType: 'deep_link',
   actionParams: {
-    uri: 'androidamap://navi?sourceApplication=SceneLens&poiname=家&dev=0',
+    // 使用 shortcutId 引用 AppLaunchController 中的配置
+    shortcutId: 'amap_home',
+    // 备用直接 URI - 打开高德地图路线规划
+    uri: 'androidamap://route?sourceApplication=SceneLens&sname=我的位置&dname=家&dev=0&t=0',
   },
   contextTriggers: {
     scenes: ['UNKNOWN', 'COMMUTE'],
@@ -56,12 +61,13 @@ export const amapHomeNavigationAction: QuickAction = {
 export const amapOfficeNavigationAction: QuickAction = {
   id: 'amap_office',
   name: '导航去公司',
-  description: '使用高德地图导航去公司',
+  description: '使用高德地图导航去公司（需要在设置中配置公司地址）',
   icon: 'briefcase',
   category: 'navigation',
   actionType: 'deep_link',
   actionParams: {
-    uri: 'androidamap://navi?sourceApplication=SceneLens&poiname=公司&dev=0',
+    shortcutId: 'amap_work',
+    uri: 'androidamap://route?sourceApplication=SceneLens&sname=我的位置&dname=公司&dev=0&t=0',
   },
   contextTriggers: {
     scenes: ['HOME', 'UNKNOWN'],

@@ -23,7 +23,8 @@ export const DEEP_LINK_SHORTCUTS: Record<string, DeepLinkConfig> = {
   // 支付类
   wechat_pay: {
     packageName: 'com.tencent.mm',
-    deepLink: 'weixin://pay',
+    // 微信付款码/收款码页面
+    deepLink: 'weixin://biz/paycode',
     fallback: 'weixin://',
     description: '微信支付',
   },
@@ -46,16 +47,17 @@ export const DEEP_LINK_SHORTCUTS: Record<string, DeepLinkConfig> = {
     description: '支付宝扫一扫',
   },
   
-  // 出行类
+  // 出行类 - 使用坐标导航更可靠
   amap_home: {
     packageName: 'com.autonavi.minimap',
-    deepLink: 'androidamap://navi?sourceApplication=scenelens&poiname=家',
+    // 使用路径规划而非直接导航，fallback 到打开高德地图
+    deepLink: 'androidamap://route?sourceApplication=SceneLens&sname=我的位置&dlat=0&dlon=0&dname=家&dev=0&t=0',
     fallback: 'androidamap://',
     description: '高德导航回家',
   },
   amap_work: {
     packageName: 'com.autonavi.minimap',
-    deepLink: 'androidamap://navi?sourceApplication=scenelens&poiname=公司',
+    deepLink: 'androidamap://route?sourceApplication=SceneLens&sname=我的位置&dlat=0&dlon=0&dname=公司&dev=0&t=0',
     fallback: 'androidamap://',
     description: '高德导航去公司',
   },

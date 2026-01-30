@@ -11,6 +11,8 @@ import type { SceneType } from '../types';
 import type { QuickAction, ActionCategory } from '../types/automation';
 import { SystemSettingsController } from '../automation/SystemSettingsController';
 import { AppLaunchController } from '../automation/AppLaunchController';
+import { preferenceManager } from '../learning/PreferenceManager';
+import { allPresets, getDefaultPresets } from './presets';
 
 // ==================== 存储键 ====================
 
@@ -68,11 +70,42 @@ export class QuickActionManager {
         this.loadUsageStats(),
         this.loadPreferences(),
       ]);
+      
+      // 如果没有任何动作，加载默认预设
+      if (this.actions.size === 0) {
+        await this.loadDefaultPresets();
+      }
+      
       this.initialized = true;
       console.log('[QuickActionManager] Initialized with', this.actions.size, 'actions');
     } catch (error) {
       console.error('[QuickActionManager] Failed to initialize:', error);
     }
+  }
+
+  /**
+   * 加载默认预设操作
+   */
+  private async loadDefaultPresets(): Promise<void> {
+    const defaults = getDefaultPresets();
+    for (const action of defaults) {
+      this.actions.set(action.id, action);
+    }
+    await this.saveActions();
+    console.log('[QuickActionManager] Loaded', defaults.length, 'default preset actions');
+  }
+
+  /**
+   * 加载所有预设操作（用于重置或首次安装）
+   */
+  async loadAllPresets(): Promise<void> {
+    for (const action of allPresets) {
+      if (!this.actions.has(action.id)) {
+        this.actions.set(action.id, action);
+      }
+    }
+    await this.saveActions();
+    console.log('[QuickActionManager] Loaded all preset actions, total:', this.actions.size);
   }
 
   // ==================== 数据加载/保存 ====================
@@ -329,13 +362,48 @@ export class QuickActionManager {
   private async performDeepLinkAction(params: Record<string, unknown>): Promise<void> {
     const { shortcutId, uri } = params;
     
-    if (shortcutId && typeof shortcutId === 'string') {
+    // 检查是否为导航操作，如果是则动态构建带坐标的 URI
+    const finalUri = await this.buildNavigationUri(shortcutId as string, uri as string);
+    
+    if (finalUri) {
+      await AppLaunchController.openDeepLink(finalUri);
+    } else if (shortcutId && typeof shortcutId === 'string') {
       await AppLaunchController.launchShortcut(shortcutId);
     } else if (uri && typeof uri === 'string') {
       await AppLaunchController.openDeepLink(uri);
     } else {
       throw new Error('Shortcut ID or URI is required');
     }
+  }
+
+  /**
+   * 为导航操作构建带坐标的 URI
+   * 如果用户设置了家庭/公司地址，使用实际坐标
+   */
+  private async buildNavigationUri(shortcutId?: string, fallbackUri?: string): Promise<string | null> {
+    await preferenceManager.initialize();
+
+    // 检查是否为回家导航
+    if (shortcutId === 'amap_home' || fallbackUri?.includes('dname=家')) {
+      const homeAddress = preferenceManager.getHomeAddress();
+      if (homeAddress && homeAddress.latitude && homeAddress.longitude) {
+        // 使用实际坐标构建 URI
+        return `androidamap://route?sourceApplication=SceneLens&sname=我的位置&dlat=${homeAddress.latitude}&dlon=${homeAddress.longitude}&dname=${encodeURIComponent(homeAddress.name || '家')}&dev=0&t=0`;
+      }
+      console.log('[QuickActionManager] Home address not configured, using fallback URI');
+    }
+
+    // 检查是否为去公司导航
+    if (shortcutId === 'amap_work' || shortcutId === 'amap_office' || fallbackUri?.includes('dname=公司')) {
+      const workAddress = preferenceManager.getWorkAddress();
+      if (workAddress && workAddress.latitude && workAddress.longitude) {
+        return `androidamap://route?sourceApplication=SceneLens&sname=我的位置&dlat=${workAddress.latitude}&dlon=${workAddress.longitude}&dname=${encodeURIComponent(workAddress.name || '公司')}&dev=0&t=0`;
+      }
+      console.log('[QuickActionManager] Work address not configured, using fallback URI');
+    }
+
+    // 不是导航操作或没有配置地址，返回 null 使用默认处理
+    return null;
   }
 
   private async performCompositeAction(params: Record<string, unknown>): Promise<void> {

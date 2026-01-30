@@ -1,8 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { PaperProvider, MD3LightTheme } from 'react-native-paper';
+import { PaperProvider, MD3LightTheme, MD3DarkTheme } from 'react-native-paper';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import {
   HomeScreen,
@@ -11,9 +11,13 @@ import {
   MeetingConfigScreen,
   StatsScreen,
   SettingsScreen,
+  NotificationFilterScreen,
+  RuleEditorScreen,
+  PermissionsScreen,
 } from './src/screens';
 import LocationConfigScreen from './src/screens/LocationConfigScreen';
 import { backgroundService } from './src/background';
+import { useSettingsStore, themeColors } from './src/stores/settingsStore';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -23,32 +27,48 @@ export type RootStackParamList = {
   LocationConfig: undefined;
   Stats: undefined;
   Settings: undefined;
+  NotificationFilter: undefined;
+  RuleEditor: undefined;
+  Permissions: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// 自定义 Material Design 3 主题
-const customTheme = {
-  ...MD3LightTheme,
-  colors: {
-    ...MD3LightTheme.colors,
-    primary: '#6750A4',
-    secondary: '#625B71',
-    tertiary: '#7D5260',
-    background: '#FFFBFE',
-    surface: '#FFFBFE',
-    surfaceVariant: '#E7E0EC',
-    onPrimary: '#FFFFFF',
-    onSecondary: '#FFFFFF',
-    onBackground: '#1C1B1F',
-    onSurface: '#1C1B1F',
-    onSurfaceVariant: '#49454F',
-    error: '#B3261E',
-    onError: '#FFFFFF',
-  },
-};
-
 export default function App() {
+  // 获取设置状态
+  const { settings, loadSettings } = useSettingsStore();
+
+  // 根据设置动态创建主题
+  const theme = useMemo(() => {
+    const baseTheme = settings.darkMode ? MD3DarkTheme : MD3LightTheme;
+    const colorScheme = themeColors[settings.themeColor];
+    
+    return {
+      ...baseTheme,
+      colors: {
+        ...baseTheme.colors,
+        primary: colorScheme.primary,
+        secondary: settings.darkMode ? colorScheme.light : colorScheme.dark,
+        tertiary: '#7D5260',
+        background: settings.darkMode ? '#121212' : '#FFFBFE',
+        surface: settings.darkMode ? '#1E1E1E' : '#FFFBFE',
+        surfaceVariant: settings.darkMode ? '#49454F' : '#E7E0EC',
+        onPrimary: '#FFFFFF',
+        onSecondary: '#FFFFFF',
+        onBackground: settings.darkMode ? '#E6E1E5' : '#1C1B1F',
+        onSurface: settings.darkMode ? '#E6E1E5' : '#1C1B1F',
+        onSurfaceVariant: settings.darkMode ? '#CAC4D0' : '#49454F',
+        error: '#B3261E',
+        onError: '#FFFFFF',
+      },
+    };
+  }, [settings.darkMode, settings.themeColor]);
+
+  // 初始化加载设置
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
   // 初始化后台服务
   useEffect(() => {
     const initBackgroundService = async () => {
@@ -70,13 +90,13 @@ export default function App() {
   }, []);
 
   return (
-    <PaperProvider theme={customTheme}>
+    <PaperProvider theme={theme}>
       <NavigationContainer>
         <Stack.Navigator
           initialRouteName="Home"
           screenOptions={{
             headerStyle: {
-              backgroundColor: customTheme.colors.primary,
+              backgroundColor: theme.colors.primary,
             },
             headerTintColor: '#fff',
             headerTitleStyle: {
@@ -92,17 +112,9 @@ export default function App() {
               headerRight: () => (
                 <TouchableOpacity
                   style={styles.headerButton}
-                  onPress={() => navigation.navigate('SceneConfig')}
+                  onPress={() => navigation.navigate('Settings')}
                 >
                   <Text style={styles.headerButtonText}>⚙️</Text>
-                </TouchableOpacity>
-              ),
-              headerLeft: () => (
-                <TouchableOpacity
-                  style={styles.headerButton}
-                  onPress={() => navigation.navigate('PermissionGuide')}
-                >
-                  <Text style={styles.headerButtonText}>🔒</Text>
                 </TouchableOpacity>
               ),
             })}
@@ -149,8 +161,29 @@ export default function App() {
               title: '设置',
             }}
           />
+          <Stack.Screen
+            name="NotificationFilter"
+            component={NotificationFilterScreen}
+            options={{
+              title: '智能通知过滤',
+            }}
+          />
+          <Stack.Screen
+            name="RuleEditor"
+            component={RuleEditorScreen}
+            options={{
+              title: '自动化规则',
+            }}
+          />
+          <Stack.Screen
+            name="Permissions"
+            component={PermissionsScreen}
+            options={{
+              title: '权限管理',
+            }}
+          />
         </Stack.Navigator>
-        <StatusBar style="light" />
+        <StatusBar style={settings.darkMode ? 'light' : 'dark'} />
       </NavigationContainer>
     </PaperProvider>
   );

@@ -8,3 +8,4 @@ export { useSceneDetection, type UseSceneDetectionReturn } from './useSceneDetec
 export { useUserTriggeredAnalysis, type UseUserTriggeredAnalysisReturn } from './useUserTriggeredAnalysis';
 export { useLocation, type UseLocationReturn } from './useLocation';
 export { useDiagnostics, type UseDiagnosticsReturn } from './useDiagnostics';
+export { usePermissions, type UsePermissionsReturn } from './usePermissions';
