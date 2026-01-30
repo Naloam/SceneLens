@@ -1,0 +1,227 @@
+{
+  "scene": "SLEEP",
+  "subScenes": [
+    {
+      "id": "SLEEP_PREPARE",
+      "conditions": [
+        "time.hour >= 21 && time.hour < 23",
+        "audio.soundEnvironment === 'quiet'"
+      ],
+      "headlines": [
+        "检测到夜间安静环境，准备休息了吗？",
+        "{greeting}，睡前准备时间",
+        "晚上{hour}点了，是时候放松准备入睡",
+        "夜深了，开启睡眠模式",
+        "睡前时光，放松身心",
+        "准备好迎接美梦了吗？"
+      ],
+      "subtexts": [
+        "建议提前半小时放下手机",
+        "明天是{tomorrow_type}，{alarm_hint}",
+        "晚间休息准备中",
+        "环境安静，适合休息",
+        "睡前放松时间"
+      ],
+      "actionReasons": {
+        "SLEEP_MODE": [
+          "开启睡眠模式，调暗屏幕并减少通知",
+          "一键进入睡眠准备状态",
+          "为优质睡眠做准备"
+        ],
+        "BRIGHTNESS": [
+          "降低亮度和蓝光，帮助入睡",
+          "护眼模式，减少屏幕刺激",
+          "睡前降低屏幕亮度"
+        ],
+        "DND": [
+          "夜间勿扰，保证睡眠质量",
+          "睡前减少通知干扰",
+          "安心入睡，开启勿扰"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "SLEEP_LATE",
+      "conditions": [
+        "time.hour >= 23 || time.hour < 2",
+        "audio.soundEnvironment === 'quiet'"
+      ],
+      "headlines": [
+        "已经{hour}点了，该休息了",
+        "夜深了，手机该放下了",
+        "熬夜伤身，早点休息吧",
+        "检测到深夜，建议尽快入睡",
+        "夜已深，睡眠模式已准备就绪",
+        "太晚了，早点睡觉哦"
+      ],
+      "subtexts": [
+        "熬夜对身体不好哦",
+        "明天还有{tomorrow_hint}",
+        "深夜了，注意休息",
+        "凌晨时分",
+        "该睡觉了"
+      ],
+      "actionReasons": {
+        "SLEEP_MODE": [
+          "现在是深夜{hour}:{minute}，强烈建议开启睡眠模式",
+          "熬夜伤身，一键进入睡眠状态",
+          "深夜了，开启睡眠模式"
+        ],
+        "DND": [
+          "深夜时段，开启勿扰保证休息",
+          "避免深夜被打扰",
+          "安心入睡"
+        ],
+        "BRIGHTNESS": [
+          "深夜降到最低亮度，保护眼睛",
+          "最大化减少蓝光",
+          "夜间护眼模式"
+        ]
+      },
+      "weight": 1.1
+    },
+    {
+      "id": "SLEEP_WEEKEND",
+      "conditions": [
+        "time.isWeekend",
+        "time.hour >= 23 || time.hour < 3"
+      ],
+      "headlines": [
+        "周末可以晚点睡，但也别太晚哦",
+        "周{weekday_name}夜晚，放松一下",
+        "{greeting}，周末夜生活？",
+        "周末深夜，注意休息",
+        "周末时光，但也要照顾身体",
+        "周末夜晚，别太晚睡"
+      ],
+      "subtexts": [
+        "周末可以适当放松",
+        "明天不用早起",
+        "享受周末夜晚",
+        "但也注意休息",
+        "周末夜间"
+      ],
+      "actionReasons": {
+        "SLEEP_MODE": [
+          "周末也可以开启睡眠模式",
+          "虽然是周末，也要注意休息",
+          "一键进入放松状态"
+        ],
+        "BRIGHTNESS": [
+          "周末深夜也要护眼",
+          "降低屏幕亮度",
+          "夜间模式"
+        ],
+        "DND": [
+          "周末深夜减少打扰",
+          "享受安静的周末夜晚",
+          "夜间勿扰"
+        ]
+      },
+      "weight": 0.9
+    },
+    {
+      "id": "SLEEP_EARLY_MORNING",
+      "conditions": [
+        "time.hour >= 0 && time.hour < 5",
+        "audio.soundEnvironment === 'quiet'"
+      ],
+      "headlines": [
+        "凌晨{hour}点了，快去睡觉！",
+        "太晚了，熬夜对身体不好",
+        "检测到凌晨还醒着，请尽快休息",
+        "身体很重要，该睡了",
+        "凌晨时分，请立即休息",
+        "很晚了，睡眠模式启动"
+      ],
+      "subtexts": [
+        "熬夜会影响明天的状态",
+        "凌晨{hour}:{minute}",
+        "身体需要休息",
+        "请尽快入睡",
+        "注意健康"
+      ],
+      "actionReasons": {
+        "SLEEP_MODE": [
+          "凌晨了，立即开启睡眠模式",
+          "熬夜伤身，马上休息",
+          "一键进入睡眠状态"
+        ],
+        "DND": [
+          "凌晨完全勿扰",
+          "保证睡眠时间",
+          "避免任何打扰"
+        ],
+        "BRIGHTNESS": [
+          "最低亮度，准备入睡",
+          "凌晨护眼模式",
+          "降低所有刺激"
+        ]
+      },
+      "weight": 1.2
+    },
+    {
+      "id": "SLEEP_NAP",
+      "conditions": [
+        "time.hour >= 12 && time.hour < 15",
+        "audio.soundEnvironment === 'quiet'",
+        "location.transportMode === 'still'"
+      ],
+      "headlines": [
+        "午休时间，小睡一会儿？",
+        "检测到安静环境，适合午休",
+        "中午{hour}点，午睡提升下午效率",
+        "{greeting}，午休模式",
+        "午后小憩，精神百倍",
+        "午休时光，补充精力"
+      ],
+      "subtexts": [
+        "建议午休15-30分钟",
+        "午后小睡提高效率",
+        "环境安静适合休息",
+        "中午时分",
+        "短暂休息"
+      ],
+      "actionReasons": {
+        "DND": [
+          "午休时间开启勿扰",
+          "小睡期间减少打扰",
+          "保证午休质量"
+        ],
+        "BRIGHTNESS": [
+          "午休降低亮度",
+          "减少视觉刺激",
+          "休息模式"
+        ],
+        "SLEEP_MODE": [
+          "开启午休模式，设置15-30分钟提醒",
+          "短时睡眠模式",
+          "午休计时"
+        ]
+      },
+      "weight": 0.8
+    }
+  ],
+  "slotFillers": {
+    "tomorrow_type": {
+      "conditions": [
+        { "when": "time.dayOfWeek === 5 || time.dayOfWeek === 6", "value": "周末" },
+        { "when": "time.dayOfWeek === 0", "value": "周一工作日" },
+        { "default": "工作日" }
+      ]
+    },
+    "tomorrow_hint": {
+      "conditions": [
+        { "when": "time.dayOfWeek === 5 || time.dayOfWeek === 6", "value": "可以睡个懒觉" },
+        { "default": "要上班/上学" }
+      ]
+    },
+    "alarm_hint": {
+      "conditions": [
+        { "when": "time.dayOfWeek === 5 || time.dayOfWeek === 6", "value": "明天不用早起" },
+        { "default": "记得设好闹钟" }
+      ]
+    }
+  }
+}

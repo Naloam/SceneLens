@@ -386,15 +386,31 @@
             "allowAlarms": true,
             "whitelist": []
           }
+        },
+        {
+          "id": "brightness_sleep",
+          "label": "降低屏幕亮度",
+          "description": "调整为最低亮度，保护眼睛",
+          "action": "setBrightness",
+          "params": {
+            "level": 0.1
+          }
         }
       ],
       "appLaunches": [],
       "oneTapActions": [
         {
-          "id": "confirm",
-          "label": "晚安",
-          "description": "确认已开启睡眠勿扰",
+          "id": "execute",
+          "label": "开启睡眠模式",
+          "description": "开启勿扰并降低亮度",
           "type": "primary",
+          "action": "execute_all"
+        },
+        {
+          "id": "dismiss",
+          "label": "稍后再说",
+          "description": "跳过本次",
+          "type": "secondary",
           "action": "dismiss"
         }
       ],

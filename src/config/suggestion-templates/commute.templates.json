@@ -1,0 +1,283 @@
+{
+  "scene": "COMMUTE",
+  "subScenes": [
+    {
+      "id": "COMMUTE_MORNING_SUBWAY",
+      "conditions": [
+        "time.hour >= 7 && time.hour < 9",
+        "!time.isWeekend",
+        "image.topLabel === 'transport_subway'"
+      ],
+      "headlines": [
+        "{greeting}！检测到您在地铁，准备开始新的一天吧",
+        "地铁通勤中，一切已为您准备就绪",
+        "{greeting}，挤地铁辛苦了，来点音乐放松一下？",
+        "早高峰{hour}:{minute}，乘车码已就绪",
+        "周{weekday_name}早，地铁通勤模式启动",
+        "检测到地铁环境，{transit_hint}"
+      ],
+      "subtexts": [
+        "图像识别: 地铁环境 ({image_confidence}%)",
+        "周围{audio_env_hint}，已建议开启勿扰",
+        "今日第{commute_count}次通勤",
+        "当前线路检测中...",
+        "为您准备了通勤必备"
+      ],
+      "actionReasons": {
+        "TRANSIT_APP": [
+          "检测到地铁环境，为您准备好乘车码",
+          "早高峰人多，快速扫码更方便",
+          "一键打开乘车码，快速进站"
+        ],
+        "MUSIC_PLAYER": [
+          "检测到周围{audio_label}，来点音乐屏蔽噪音",
+          "通勤路上听点什么？",
+          "启动您的通勤歌单"
+        ],
+        "DND": [
+          "地铁信号不稳定，开启勿扰避免漏接重要来电通知",
+          "专心赶路，减少不必要的打扰",
+          "通勤时间，仅允许紧急联系人来电"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "COMMUTE_MORNING_BUS",
+      "conditions": [
+        "time.hour >= 7 && time.hour < 9",
+        "!time.isWeekend",
+        "image.topLabel === 'transport_bus'"
+      ],
+      "headlines": [
+        "{greeting}！检测到您在公交上",
+        "公交通勤模式，乘车码已准备就绪",
+        "周{weekday_name}早上好，公交出行真环保",
+        "{time_period}好，检测到公交环境",
+        "早高峰公交，一切准备就绪",
+        "公交通勤中，为您开启便捷模式"
+      ],
+      "subtexts": [
+        "图像识别: 公交车环境 ({image_confidence}%)",
+        "公交出行，低碳环保",
+        "今日第{commute_count}次通勤",
+        "周围环境: {audio_env_hint}",
+        "预计到站中..."
+      ],
+      "actionReasons": {
+        "TRANSIT_APP": [
+          "检测到公交环境，为您准备好乘车码",
+          "一键扫码上车",
+          "公交出行，快速刷卡"
+        ],
+        "MUSIC_PLAYER": [
+          "公交车上听点什么？",
+          "来点音乐让通勤更轻松",
+          "打开您常听的播客"
+        ],
+        "DND": [
+          "公交通勤中，减少打扰",
+          "专注出行，开启勿扰",
+          "通勤途中避免打断"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "COMMUTE_MORNING_WALK",
+      "conditions": [
+        "time.hour >= 7 && time.hour < 9",
+        "!time.isWeekend",
+        "image.environmentType === 'outdoor'",
+        "location.transportMode === 'walking'"
+      ],
+      "headlines": [
+        "{greeting}！步行上班，今天天气{weather}",
+        "检测到步行中，早晨空气不错哦",
+        "周{weekday_name}早上好，走路上班真健康",
+        "步行通勤模式，{encouragement}！",
+        "{time_period}好，检测到您在步行",
+        "早安，今日步行通勤开始"
+      ],
+      "subtexts": [
+        "运动状态: 步行中",
+        "今日第{commute_count}次出行",
+        "步行有益健康",
+        "早晨运动，精神更好",
+        "户外环境，注意安全"
+      ],
+      "actionReasons": {
+        "MUSIC_PLAYER": [
+          "步行路上来点音乐",
+          "听首歌让脚步更轻快",
+          "早晨散步配音乐，心情更好"
+        ],
+        "DND": [
+          "步行注意安全，开启勿扰",
+          "专心走路，减少打扰",
+          "通勤路上避免分心"
+        ],
+        "TRANSIT_APP": [
+          "查看公交地铁实时状态",
+          "以防需要换乘交通工具",
+          "查看最近站点信息"
+        ]
+      },
+      "weight": 0.9
+    },
+    {
+      "id": "COMMUTE_EVENING_RETURN",
+      "conditions": [
+        "time.hour >= 17 && time.hour < 19",
+        "!time.isWeekend"
+      ],
+      "headlines": [
+        "下班了，准备回家吧",
+        "{greeting}，今天{work_hint}辛苦了",
+        "晚高峰{hour}:{minute}，回家路上注意安全",
+        "检测到下班时间，一切已为您准备就绪",
+        "周{weekday_name}晚，准备回家的通勤模式",
+        "下班通勤，为您开启回家助手"
+      ],
+      "subtexts": [
+        "晚高峰时段，人多注意安全",
+        "今天在外{hours_away}小时了",
+        "回家路上听点轻松的",
+        "下班辛苦，早点休息",
+        "为您准备好乘车码"
+      ],
+      "actionReasons": {
+        "TRANSIT_APP": [
+          "下班高峰时段，为您准备好乘车码",
+          "晚高峰赶路，一键打开乘车码",
+          "回家路上方便快速进站"
+        ],
+        "MUSIC_PLAYER": [
+          "下班路上听点轻松的音乐",
+          "缓解一天的疲惫",
+          "通勤途中放松心情"
+        ],
+        "DND": [
+          "通勤路上减少打扰",
+          "专心赶路回家",
+          "晚高峰避免分心"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "COMMUTE_EVENING_TIRED",
+      "conditions": [
+        "time.hour >= 19 && time.hour < 22",
+        "device.batteryLevel < 30"
+      ],
+      "headlines": [
+        "辛苦了，下班路上注意安全",
+        "加班{overtime_hint}，赶紧回家休息吧",
+        "{greeting}，电量{battery}%，要不要省电模式？",
+        "今天工作辛苦了，早点到家休息",
+        "检测到电量偏低，为您开启省电",
+        "晚了，回家路上注意休息"
+      ],
+      "subtexts": [
+        "检测到您还在通勤，今天工作辛苦了",
+        "电量偏低({battery}%)，已建议降低亮度",
+        "加班后通勤，注意安全",
+        "今天在外时间较长",
+        "建议开启省电模式"
+      ],
+      "actionReasons": {
+        "BRIGHTNESS": [
+          "电量{battery}%，降低亮度节省电量",
+          "夜间{hour}点，降低亮度保护眼睛",
+          "省电模式，确保到家有电"
+        ],
+        "MUSIC_PLAYER": [
+          "听点轻松的音乐缓解疲惫",
+          "加班后放松一下",
+          "通勤途中放松心情"
+        ],
+        "POWER_SAVE": [
+          "电量较低，开启省电模式",
+          "确保回家前手机有电",
+          "节省电量以防紧急情况"
+        ]
+      },
+      "weight": 1.1
+    },
+    {
+      "id": "COMMUTE_WEEKEND",
+      "conditions": [
+        "time.isWeekend",
+        "image.environmentType === 'transport'"
+      ],
+      "headlines": [
+        "周末出行，放松一下吧",
+        "{greeting}，周末交通工具上",
+        "周{weekday_name}出门，{encouragement}",
+        "周末出行模式，一切已准备就绪",
+        "检测到交通工具，周末出行愉快",
+        "周末时光，享受出行"
+      ],
+      "subtexts": [
+        "周末出行，不着急",
+        "环境: {specific_place}",
+        "周末时光，放松心情",
+        "检测到交通环境",
+        "祝您出行愉快"
+      ],
+      "actionReasons": {
+        "MUSIC_PLAYER": [
+          "周末出行配点音乐",
+          "轻松的周末，轻松的音乐",
+          "享受周末时光"
+        ],
+        "TRANSIT_APP": [
+          "周末出行准备好乘车码",
+          "方便您的周末出行",
+          "一键打开乘车码"
+        ],
+        "DND": [
+          "周末出行也可以开启勿扰",
+          "享受独处时光",
+          "减少不必要的打扰"
+        ]
+      },
+      "weight": 0.8
+    }
+  ],
+  "slotFillers": {
+    "greeting": {
+      "conditions": [
+        { "when": "time.hour < 10", "value": "早上好" },
+        { "when": "time.hour < 12", "value": "上午好" },
+        { "when": "time.hour < 14", "value": "中午好" },
+        { "when": "time.hour < 18", "value": "下午好" },
+        { "default": "晚上好" }
+      ]
+    },
+    "weekday_name": {
+      "mapping": {
+        "0": "日", "1": "一", "2": "二", "3": "三",
+        "4": "四", "5": "五", "6": "六"
+      },
+      "source": "time.dayOfWeek"
+    },
+    "transit_hint": {
+      "conditions": [
+        { "when": "user.commuteCountToday > 0", "value": "继续上次的行程？" },
+        { "default": "为您准备好乘车码" }
+      ]
+    },
+    "audio_env_hint": {
+      "mapping": {
+        "crowd": "嘈杂",
+        "traffic": "有交通声",
+        "silence": "相对安静",
+        "speech": "有人交谈"
+      },
+      "source": "audio.topLabel",
+      "default": "正常"
+    }
+  }
+}

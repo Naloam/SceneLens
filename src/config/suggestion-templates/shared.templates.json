@@ -1,0 +1,284 @@
+{
+  "shared": {
+    "greetings": {
+      "earlyMorning": ["早安", "清晨好", "早上好"],
+      "morning": ["早上好", "上午好", "早安"],
+      "noon": ["中午好", "午安"],
+      "afternoon": ["下午好", "午后好"],
+      "evening": ["晚上好", "傍晚好"],
+      "night": ["夜深了", "晚安", "夜晚好"]
+    },
+    "encouragements": [
+      "加油",
+      "继续保持",
+      "你真棒",
+      "做得好",
+      "太棒了",
+      "很不错",
+      "继续努力",
+      "保持状态",
+      "非常好",
+      "真厉害"
+    ],
+    "weekdayNames": {
+      "0": "日",
+      "1": "一",
+      "2": "二",
+      "3": "三",
+      "4": "四",
+      "5": "五",
+      "6": "六"
+    },
+    "timePeriods": {
+      "earlyMorning": { "start": 5, "end": 7, "name": "清晨" },
+      "morning": { "start": 7, "end": 11, "name": "上午" },
+      "noon": { "start": 11, "end": 13, "name": "中午" },
+      "afternoon": { "start": 13, "end": 18, "name": "下午" },
+      "evening": { "start": 18, "end": 21, "name": "傍晚" },
+      "night": { "start": 21, "end": 24, "name": "夜晚" },
+      "lateNight": { "start": 0, "end": 5, "name": "深夜" }
+    },
+    "audioEnvironmentHints": {
+      "quiet": "环境安静",
+      "crowd": "人声嘈杂",
+      "traffic": "交通噪音",
+      "music": "有音乐声",
+      "speech": "有人交谈",
+      "nature": "自然环境",
+      "indoor": "室内环境",
+      "unknown": "正常环境"
+    },
+    "batteryWarnings": {
+      "critical": { "threshold": 10, "hint": "电量告急" },
+      "low": { "threshold": 20, "hint": "电量偏低" },
+      "medium": { "threshold": 50, "hint": "电量一般" },
+      "good": { "threshold": 80, "hint": "电量充足" },
+      "full": { "threshold": 100, "hint": "电量满格" }
+    },
+    "workHints": [
+      "工作",
+      "忙碌",
+      "努力",
+      "奋斗"
+    ],
+    "overtimeHints": [
+      "很晚了",
+      "已经很久了",
+      "时间不早了"
+    ],
+    "contextBasedSuggestions": {
+      "charging": "安心充电",
+      "lowBattery": "注意电量",
+      "quiet": "环境安静",
+      "noisy": "环境嘈杂",
+      "meeting": "会议准备",
+      "default": "一切正常"
+    }
+  },
+  "defaultSlotFillers": {
+    "greeting": {
+      "type": "conditional",
+      "conditions": [
+        { "when": "time.hour >= 5 && time.hour < 7", "values": ["早安", "清晨好"] },
+        { "when": "time.hour >= 7 && time.hour < 11", "values": ["早上好", "上午好"] },
+        { "when": "time.hour >= 11 && time.hour < 13", "values": ["中午好", "午安"] },
+        { "when": "time.hour >= 13 && time.hour < 18", "values": ["下午好"] },
+        { "when": "time.hour >= 18 && time.hour < 21", "values": ["晚上好", "傍晚好"] },
+        { "default": ["夜深了", "晚安"] }
+      ]
+    },
+    "time_period": {
+      "type": "conditional",
+      "conditions": [
+        { "when": "time.hour >= 5 && time.hour < 7", "value": "清晨" },
+        { "when": "time.hour >= 7 && time.hour < 11", "value": "上午" },
+        { "when": "time.hour >= 11 && time.hour < 13", "value": "中午" },
+        { "when": "time.hour >= 13 && time.hour < 18", "value": "下午" },
+        { "when": "time.hour >= 18 && time.hour < 21", "value": "傍晚" },
+        { "when": "time.hour >= 21", "value": "夜晚" },
+        { "default": "深夜" }
+      ]
+    },
+    "encouragement": {
+      "type": "random",
+      "values": [
+        "加油", "继续保持", "你真棒", "做得好", "太棒了",
+        "很不错", "继续努力", "保持状态", "非常好", "真厉害"
+      ]
+    },
+    "weekday_name": {
+      "type": "mapping",
+      "source": "time.dayOfWeek",
+      "mapping": {
+        "0": "日", "1": "一", "2": "二", "3": "三",
+        "4": "四", "5": "五", "6": "六"
+      }
+    },
+    "hour": {
+      "type": "direct",
+      "source": "time.hour"
+    },
+    "minute": {
+      "type": "direct",
+      "source": "time.minute",
+      "format": "padStart2"
+    },
+    "battery": {
+      "type": "direct",
+      "source": "device.batteryLevel"
+    },
+    "battery_hint": {
+      "type": "conditional",
+      "conditions": [
+        { "when": "device.batteryLevel < 10", "value": "电量告急" },
+        { "when": "device.batteryLevel < 20", "value": "电量偏低" },
+        { "when": "device.batteryLevel < 50", "value": "电量一般" },
+        { "when": "device.batteryLevel < 80", "value": "电量充足" },
+        { "default": "电量满格" }
+      ]
+    },
+    "wifi_ssid": {
+      "type": "direct",
+      "source": "location.wifiSSID",
+      "fallback": "未知网络"
+    },
+    "image_confidence": {
+      "type": "computed",
+      "expression": "Math.round(image.confidence * 100)"
+    },
+    "audio_env_hint": {
+      "type": "mapping",
+      "source": "audio.topLabel",
+      "mapping": {
+        "quiet": "安静",
+        "crowd": "嘈杂",
+        "traffic": "交通声",
+        "music": "有音乐",
+        "speech": "有交谈",
+        "nature": "自然声"
+      },
+      "default": "正常"
+    },
+    "specific_place": {
+      "type": "direct",
+      "source": "location.matchedFence",
+      "fallback": "当前位置"
+    },
+    "work_hint": {
+      "type": "random",
+      "values": ["工作", "忙碌", "努力", "奋斗"]
+    },
+    "overtime_hint": {
+      "type": "random",
+      "values": ["很晚了", "已经很久了", "时间不早了"]
+    },
+    "context_based_suggestion": {
+      "type": "conditional",
+      "conditions": [
+        { "when": "device.isCharging", "value": "安心充电" },
+        { "when": "device.batteryLevel < 20", "value": "注意电量" },
+        { "when": "audio.soundEnvironment === 'quiet'", "value": "环境安静" },
+        { "when": "audio.soundEnvironment === 'noisy'", "value": "环境嘈杂" },
+        { "default": "一切正常" }
+      ]
+    }
+  },
+  "actionTypes": {
+    "DND": {
+      "displayName": "勿扰模式",
+      "icon": "moon",
+      "category": "system"
+    },
+    "BRIGHTNESS": {
+      "displayName": "屏幕亮度",
+      "icon": "sun",
+      "category": "system"
+    },
+    "VOLUME": {
+      "displayName": "音量调节",
+      "icon": "volume",
+      "category": "system"
+    },
+    "SLEEP_MODE": {
+      "displayName": "睡眠模式",
+      "icon": "bed",
+      "category": "system"
+    },
+    "POWER_SAVE": {
+      "displayName": "省电模式",
+      "icon": "battery",
+      "category": "system"
+    },
+    "TRANSIT_APP": {
+      "displayName": "乘车码",
+      "icon": "train",
+      "category": "app"
+    },
+    "MUSIC_PLAYER": {
+      "displayName": "音乐播放",
+      "icon": "music",
+      "category": "app"
+    },
+    "MEETING_APP": {
+      "displayName": "会议应用",
+      "icon": "video",
+      "category": "app"
+    },
+    "STUDY_APP": {
+      "displayName": "学习应用",
+      "icon": "book",
+      "category": "app"
+    },
+    "SMART_HOME": {
+      "displayName": "智能家居",
+      "icon": "home",
+      "category": "app"
+    },
+    "CALENDAR": {
+      "displayName": "日历",
+      "icon": "calendar",
+      "category": "app"
+    },
+    "CAMERA_APP": {
+      "displayName": "相机",
+      "icon": "camera",
+      "category": "app"
+    },
+    "MAP_APP": {
+      "displayName": "地图",
+      "icon": "map",
+      "category": "app"
+    },
+    "NAVIGATION_APP": {
+      "displayName": "导航",
+      "icon": "navigation",
+      "category": "app"
+    },
+    "PAYMENT_APP": {
+      "displayName": "支付",
+      "icon": "creditcard",
+      "category": "app"
+    }
+  },
+  "fallbackTemplates": {
+    "headline": [
+      "{greeting}，为您准备好了智能建议",
+      "检测到当前环境，以下是为您的推荐",
+      "根据当前情境，为您智能推荐",
+      "场景已识别，智能建议已就绪",
+      "{greeting}，看看这些建议"
+    ],
+    "subtext": [
+      "基于当前环境分析",
+      "智能场景识别",
+      "为您定制的建议",
+      "根据您的习惯推荐",
+      "实时场景分析"
+    ],
+    "actionReason": [
+      "根据当前场景推荐",
+      "可能对您有帮助",
+      "基于环境分析建议"
+    ]
+  }
+}

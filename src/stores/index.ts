@@ -11,3 +11,7 @@ export type { AppSettings, ThemeColor, NotificationStyle, DetectionInterval } fr
 
 export { storageManager } from './storageManager';
 export { geoFenceManager } from './geoFenceManager';
+
+// AI 模型统计
+export { useMLStatsStore } from './mlStatsStore';
+export type { InferenceRecord, ModelInferenceStats, DailyStats } from './mlStatsStore';

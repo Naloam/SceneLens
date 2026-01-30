@@ -45,6 +45,8 @@ import {
   SceneSelector,
   PredictionCard,
   FeedbackReportCard,
+  MLPredictionDetailCard,
+  ModelStatusCard,
 } from '../components/home';
 
 import type { SceneSuggestionPackage, SuggestionExecutionResult, SceneHistory, TriggeredContext, SceneType } from '../types';
@@ -378,6 +380,15 @@ export const HomeScreen: React.FC = () => {
         onSwitchScene={() => setSceneSelectorVisible(true)}
       />
 
+      {/* AI 预测详情卡片 - 展示图像/音频分类结果 */}
+      {triggeredResult && triggeredResult.predictions.length > 0 && (
+        <MLPredictionDetailCard
+          predictions={triggeredResult.predictions}
+          timestamp={triggeredResult.timestamp}
+          initialExpanded={false}
+        />
+      )}
+
       {/* 智能预测卡片（Phase 3） */}
       <PredictionCard
         currentScene={currentContext?.context || 'UNKNOWN'}
@@ -389,6 +400,9 @@ export const HomeScreen: React.FC = () => {
           Alert.alert('出发提醒', reminder.message);
         }}
       />
+
+      {/* AI 模型状态卡片 */}
+      <ModelStatusCard initialExpanded={false} />
 
       {/* 场景执行建议包卡片 */}
       {sceneSuggestion && (

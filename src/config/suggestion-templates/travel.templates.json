@@ -1,0 +1,244 @@
+{
+  "scene": "TRAVEL",
+  "subScenes": [
+    {
+      "id": "TRAVEL_AIRPORT",
+      "conditions": [
+        "image.topLabel === 'airport' || location.matchedFence === '机场'"
+      ],
+      "headlines": [
+        "检测到机场环境，旅途愉快！",
+        "机场出发，一切准备就绪",
+        "{greeting}，机场模式已开启",
+        "飞行前检查一下必备App",
+        "机场场景，为您准备出行助手",
+        "准备起飞，旅途平安"
+      ],
+      "subtexts": [
+        "图像识别: 机场环境 ({image_confidence}%)",
+        "记得检查登机牌和证件",
+        "祝您旅途愉快",
+        "机场出行模式",
+        "飞行准备中"
+      ],
+      "actionReasons": {
+        "TRANSIT_APP": [
+          "检测到机场，为您打开航旅App查看航班状态",
+          "查看航班登机信息",
+          "一键打开航旅应用"
+        ],
+        "DND": [
+          "飞行期间建议开启勿扰",
+          "飞行模式准备",
+          "减少不必要的打扰"
+        ],
+        "POWER_SAVE": [
+          "旅途漫长，开启省电模式",
+          "确保手机电量充足",
+          "长途旅行省电设置"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "TRAVEL_TRAIN_STATION",
+      "conditions": [
+        "image.topLabel === 'train_station' || location.matchedFence === '火车站'"
+      ],
+      "headlines": [
+        "检测到火车站，出发旅行！",
+        "{greeting}，火车站出行模式",
+        "火车站场景，准备开启旅程",
+        "火车出行，一切就绪",
+        "检测到火车站环境，祝旅途愉快",
+        "火车站，旅行模式启动"
+      ],
+      "subtexts": [
+        "图像识别: 火车站 ({image_confidence}%)",
+        "记得检查车票和证件",
+        "注意检票时间",
+        "火车出行模式",
+        "祝旅途顺利"
+      ],
+      "actionReasons": {
+        "TRANSIT_APP": [
+          "检测到火车站，为您打开12306查看车次",
+          "查看列车时刻和检票口",
+          "一键打开铁路App"
+        ],
+        "MUSIC_PLAYER": [
+          "火车上听点音乐或播客",
+          "旅途中的娱乐伴侣",
+          "长途旅行配乐"
+        ],
+        "POWER_SAVE": [
+          "长途火车开启省电",
+          "确保旅途中有电",
+          "节省电量"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "TRAVEL_ROAD_TRIP",
+      "conditions": [
+        "image.topLabel === 'highway' || location.transportMode === 'driving'"
+      ],
+      "headlines": [
+        "检测到自驾出行，注意安全！",
+        "公路旅行模式，安全第一",
+        "{greeting}，自驾出行中",
+        "自驾旅途，一路顺风",
+        "检测到驾驶状态，开启导航",
+        "自驾游模式，享受旅程"
+      ],
+      "subtexts": [
+        "驾驶时请勿操作手机",
+        "注意交通安全",
+        "自驾出行中",
+        "检测到驾驶状态",
+        "安全驾驶"
+      ],
+      "actionReasons": {
+        "DND": [
+          "驾驶时开启勿扰，安全第一",
+          "专注驾驶，减少干扰",
+          "驾驶安全模式"
+        ],
+        "NAVIGATION_APP": [
+          "开启导航，规划最佳路线",
+          "实时路况导航",
+          "一键打开导航"
+        ],
+        "MUSIC_PLAYER": [
+          "自驾配音乐，旅途更愉快",
+          "播放驾驶歌单",
+          "旅途音乐"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "TRAVEL_WALKING_TOUR",
+      "conditions": [
+        "image.environmentType === 'outdoor'",
+        "location.transportMode === 'walking'",
+        "location.matchedFence === null"
+      ],
+      "headlines": [
+        "检测到户外步行，享受旅行！",
+        "徒步旅行中，{encouragement}",
+        "{greeting}，户外探索模式",
+        "漫步中，风景如何？",
+        "检测到户外行走，旅游模式",
+        "步行游览，发现美好"
+      ],
+      "subtexts": [
+        "户外环境，注意安全",
+        "旅行中的步行探索",
+        "享受旅途风景",
+        "户外状态",
+        "步行游览中"
+      ],
+      "actionReasons": {
+        "CAMERA_APP": [
+          "风景很美？打开相机记录",
+          "旅途拍照留念",
+          "一键打开相机"
+        ],
+        "MAP_APP": [
+          "查看周边景点和美食",
+          "探索附近好去处",
+          "旅游地图导航"
+        ],
+        "MUSIC_PLAYER": [
+          "步行配点音乐",
+          "旅途中的BGM",
+          "边走边听"
+        ]
+      },
+      "weight": 0.9
+    },
+    {
+      "id": "TRAVEL_SCENIC_SPOT",
+      "conditions": [
+        "image.topLabel === 'outdoor_scenic'",
+        "time.isWeekend"
+      ],
+      "headlines": [
+        "检测到景区环境，旅游愉快！",
+        "周末出游，享受美景",
+        "{greeting}，景区旅游模式",
+        "景点游览中，{encouragement}",
+        "检测到旅游场景，开心玩耍",
+        "风景区模式，记录美好"
+      ],
+      "subtexts": [
+        "图像识别: 户外风景 ({image_confidence}%)",
+        "周末出游好心情",
+        "旅游景区",
+        "享受美景",
+        "旅途愉快"
+      ],
+      "actionReasons": {
+        "CAMERA_APP": [
+          "美景当前，快拍下来！",
+          "记录旅途美好瞬间",
+          "一键打开相机"
+        ],
+        "MAP_APP": [
+          "查看景区地图和路线",
+          "找到下一个景点",
+          "景区导览"
+        ],
+        "DND": [
+          "专心游览，开启勿扰",
+          "享受旅途时光",
+          "减少打扰"
+        ]
+      },
+      "weight": 0.9
+    },
+    {
+      "id": "TRAVEL_HOTEL",
+      "conditions": [
+        "image.topLabel === 'indoor_hotel'",
+        "time.hour >= 18 || time.hour < 8"
+      ],
+      "headlines": [
+        "检测到酒店环境，旅途休息",
+        "{greeting}，酒店休息模式",
+        "酒店入住，好好休息",
+        "旅途疲惫，酒店放松",
+        "检测到酒店，休息一下吧",
+        "酒店时光，充电恢复"
+      ],
+      "subtexts": [
+        "旅途休息很重要",
+        "酒店环境",
+        "好好休息，明天继续",
+        "旅行住宿中",
+        "休息充电"
+      ],
+      "actionReasons": {
+        "BRIGHTNESS": [
+          "酒店休息，调低亮度",
+          "放松模式",
+          "休息时护眼"
+        ],
+        "DND": [
+          "酒店休息开启勿扰",
+          "旅途中好好休息",
+          "减少打扰"
+        ],
+        "SLEEP_MODE": [
+          "旅行中也要保证睡眠",
+          "开启酒店休息模式",
+          "准备休息"
+        ]
+      },
+      "weight": 0.8
+    }
+  ],
+  "slotFillers": {}
+}

@@ -1,0 +1,260 @@
+{
+  "scene": "HOME",
+  "subScenes": [
+    {
+      "id": "HOME_ARRIVED",
+      "conditions": [
+        "location.matchedFence === '家'",
+        "location.wifiSSID !== null"
+      ],
+      "headlines": [
+        "欢迎回家！今天{work_hint}辛苦了",
+        "到家了，一切安好",
+        "检测到您已到家，放松时间开始",
+        "{greeting}，家是最温馨的港湾",
+        "回到家了，辛苦了",
+        "到家咯，放松一下吧"
+      ],
+      "subtexts": [
+        "已连接 WiFi: {wifi_ssid}",
+        "今日在外 {hours_away} 小时",
+        "智能家居已就绪",
+        "欢迎回到温暖的家",
+        "已检测到家庭网络"
+      ],
+      "actionReasons": {
+        "DND": [
+          "到家了，恢复正常通知",
+          "不用再担心漏接消息",
+          "在家可以放心接收通知"
+        ],
+        "SMART_HOME": [
+          "已检测到家庭网络，是否启动智能家居？",
+          "一键开启回家模式",
+          "自动调节家居设备"
+        ],
+        "BRIGHTNESS": [
+          "室内环境，调整至舒适亮度",
+          "到家了，调整屏幕亮度",
+          "室内光线适中，自动调节"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "HOME_EVENING_RELAX",
+      "conditions": [
+        "time.hour >= 19 && time.hour < 22",
+        "image.topLabel === 'indoor_home'"
+      ],
+      "headlines": [
+        "傍晚时分，放松一下吧",
+        "{greeting}，在家休息中",
+        "居家时光，享受宁静",
+        "检测到您在家，{context_based_suggestion}",
+        "晚间居家模式已启动",
+        "傍晚好，放松时间开始"
+      ],
+      "subtexts": [
+        "环境: 家中 ({image_confidence}%)",
+        "今天辛苦了，好好休息",
+        "晚间居家，享受生活",
+        "周围环境: {audio_env_hint}",
+        "傍晚时光，放松心情"
+      ],
+      "actionReasons": {
+        "MUSIC_PLAYER": [
+          "傍晚时分来点轻音乐",
+          "放松一下，听听喜欢的歌",
+          "居家时光配点音乐"
+        ],
+        "SMART_HOME": [
+          "调节智能灯光到舒适模式",
+          "开启傍晚家居模式",
+          "自动调节家居氛围"
+        ],
+        "BRIGHTNESS": [
+          "傍晚室内，调低屏幕亮度",
+          "保护眼睛，降低亮度",
+          "室内光线调节"
+        ]
+      },
+      "weight": 0.9
+    },
+    {
+      "id": "HOME_WEEKEND_MORNING",
+      "conditions": [
+        "time.isWeekend",
+        "time.hour >= 8 && time.hour < 11",
+        "audio.soundEnvironment === 'quiet'"
+      ],
+      "headlines": [
+        "周末早上好，睡个好觉了吗？",
+        "{greeting}，周末慢慢来",
+        "周{weekday_name}早晨，享受周末时光",
+        "周末的早晨，不用着急",
+        "检测到周末早晨，{encouragement}",
+        "周末早安，今天有什么计划？"
+      ],
+      "subtexts": [
+        "周末不用赶时间",
+        "环境安静，好好休息",
+        "享受周末的悠闲",
+        "今日是周末",
+        "慢节奏的早晨"
+      ],
+      "actionReasons": {
+        "MUSIC_PLAYER": [
+          "周末早晨来点轻音乐",
+          "慢慢享受周末时光",
+          "听点喜欢的开启美好周末"
+        ],
+        "SMART_HOME": [
+          "周末模式，调节家居氛围",
+          "开启周末休闲模式",
+          "自动调节到周末设定"
+        ],
+        "DND": [
+          "周末早晨可以继续保持勿扰",
+          "享受安静的周末早晨",
+          "不被打扰的周末"
+        ]
+      },
+      "weight": 0.9
+    },
+    {
+      "id": "HOME_WEEKEND_AFTERNOON",
+      "conditions": [
+        "time.isWeekend",
+        "time.hour >= 14 && time.hour < 18"
+      ],
+      "headlines": [
+        "周末下午，放松一下",
+        "{greeting}，周末下午时光",
+        "周{weekday_name}下午好，在家真舒服",
+        "检测到周末下午，享受生活",
+        "周末的午后，{encouragement}",
+        "下午好，周末时光继续"
+      ],
+      "subtexts": [
+        "周末下午悠闲时光",
+        "在家休息真好",
+        "享受周末的惬意",
+        "下午时分",
+        "周末愉快"
+      ],
+      "actionReasons": {
+        "MUSIC_PLAYER": [
+          "下午茶时间配点音乐",
+          "周末下午听首歌",
+          "放松的午后音乐"
+        ],
+        "SMART_HOME": [
+          "调节家居到下午模式",
+          "自动调节室内温度",
+          "周末下午家居设定"
+        ],
+        "BRIGHTNESS": [
+          "下午光线调节",
+          "保护眼睛，适当亮度",
+          "室内环境自动调节"
+        ]
+      },
+      "weight": 0.8
+    },
+    {
+      "id": "HOME_NIGHT",
+      "conditions": [
+        "time.hour >= 22 || time.hour < 2",
+        "audio.soundEnvironment === 'quiet'"
+      ],
+      "headlines": [
+        "夜深了，早点休息吧",
+        "已经{hour}点了，准备睡觉吗？",
+        "检测到家中安静，是时候休息了",
+        "{greeting}，夜已深",
+        "深夜了，该休息了",
+        "夜晚好，准备进入梦乡"
+      ],
+      "subtexts": [
+        "明天是{tomorrow_type}，{alarm_hint}",
+        "您已在家静坐超过 {still_duration} 分钟",
+        "环境安静，适合休息",
+        "夜深人静",
+        "晚安，好梦"
+      ],
+      "actionReasons": {
+        "SLEEP_MODE": [
+          "现在是{hour}:{minute}，建议开启睡眠模式",
+          "一键开启睡眠模式",
+          "进入睡眠准备"
+        ],
+        "BRIGHTNESS": [
+          "夜间护眼，降低屏幕亮度",
+          "深夜了，降低蓝光",
+          "保护眼睛，准备休息"
+        ],
+        "DND": [
+          "保证睡眠质量，开启勿扰模式",
+          "夜间勿扰，安心入睡",
+          "避免睡眠被打扰"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "HOME_CHARGING",
+      "conditions": [
+        "device.isCharging",
+        "location.matchedFence === '家'"
+      ],
+      "headlines": [
+        "正在充电中，电量{battery}%",
+        "检测到充电状态，放心休息",
+        "手机充电中，{context_based_suggestion}",
+        "{greeting}，充电进行中",
+        "在家充电，一切正常",
+        "充电模式，电量恢复中"
+      ],
+      "subtexts": [
+        "当前电量: {battery}%",
+        "充电中，预计很快充满",
+        "电量正在恢复",
+        "充电状态正常",
+        "在家充电中"
+      ],
+      "actionReasons": {
+        "SMART_HOME": [
+          "充电时可以远程控制家居",
+          "检查智能家居状态",
+          "调节家居设备"
+        ],
+        "BRIGHTNESS": [
+          "充电时可以正常亮度",
+          "不用担心电量，正常使用",
+          "充电中自动调节"
+        ],
+        "DND": [
+          "充电休息时开启勿扰",
+          "安心充电，减少打扰",
+          "休息时间勿扰模式"
+        ]
+      },
+      "weight": 0.7
+    }
+  ],
+  "slotFillers": {
+    "tomorrow_type": {
+      "conditions": [
+        { "when": "time.dayOfWeek === 5 || time.dayOfWeek === 6", "value": "周末" },
+        { "default": "工作日" }
+      ]
+    },
+    "tomorrow_hint": {
+      "conditions": [
+        { "when": "time.dayOfWeek === 5 || time.dayOfWeek === 6", "value": "可以睡个懒觉" },
+        { "default": "记得设好闹钟" }
+      ]
+    }
+  }
+}

@@ -19,6 +19,7 @@ import { useSceneStore, SceneHistory } from '../stores';
 import { useShallow } from 'zustand/react/shallow';
 import { getSceneColor, getSceneContainerColor } from '../theme/colors';
 import { spacing } from '../theme/spacing';
+import { AIStatsCard } from '../components/home/AIStatsCard';
 import type { SceneType } from '../types';
 
 /**
@@ -341,6 +342,9 @@ export const StatsScreen: React.FC = () => {
           {renderSceneDistribution()}
         </Card.Content>
       </Card>
+
+      {/* AI 模型使用统计 */}
+      <AIStatsCard timeFilter={timeFilter} />
 
       {/* 最常检测场景排行榜 */}
       <Card mode="outlined" style={styles.card}>

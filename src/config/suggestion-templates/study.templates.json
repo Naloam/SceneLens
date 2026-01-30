@@ -1,0 +1,248 @@
+{
+  "scene": "STUDY",
+  "subScenes": [
+    {
+      "id": "STUDY_LIBRARY",
+      "conditions": [
+        "image.topLabel === 'library'",
+        "audio.soundEnvironment === 'quiet'"
+      ],
+      "headlines": [
+        "检测到图书馆环境，专注学习模式",
+        "安静的学习环境，加油！",
+        "图书馆时间，开启勿扰专心学习",
+        "{greeting}，图书馆学习中",
+        "检测到图书馆，{encouragement}",
+        "图书馆场景，专注模式启动"
+      ],
+      "subtexts": [
+        "环境安静度: {quiet_level}",
+        "已识别为学习场景",
+        "图书馆内请保持安静",
+        "学习环境良好",
+        "适合深度学习"
+      ],
+      "actionReasons": {
+        "DND": [
+          "图书馆请保持安静，开启完全勿扰",
+          "专注学习，避免打扰",
+          "学习时间，仅允许紧急通知"
+        ],
+        "STUDY_APP": [
+          "打开学习应用，开始专注",
+          "开启番茄钟学习",
+          "启动学习计时器"
+        ],
+        "VOLUME": [
+          "自动静音，不打扰他人",
+          "图书馆静音模式",
+          "保持安静"
+        ]
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "STUDY_HOME",
+      "conditions": [
+        "image.topLabel === 'indoor_home'",
+        "audio.soundEnvironment === 'quiet'",
+        "time.hour >= 19 && time.hour < 23"
+      ],
+      "headlines": [
+        "晚间学习时间，专注模式开启",
+        "在家学习中，{encouragement}",
+        "检测到安静环境，适合学习",
+        "{greeting}，开始学习吧",
+        "家中学习，效率满满",
+        "晚间学习，保持专注"
+      ],
+      "subtexts": [
+        "家中环境安静",
+        "适合晚间学习",
+        "专注学习中",
+        "晚上{hour}:{minute}",
+        "学习模式"
+      ],
+      "actionReasons": {
+        "DND": [
+          "学习时间开启勿扰",
+          "减少干扰，提高效率",
+          "专注学习，减少通知"
+        ],
+        "STUDY_APP": [
+          "打开学习应用",
+          "开始专注学习",
+          "启动学习计划"
+        ],
+        "BRIGHTNESS": [
+          "夜间学习，调节护眼亮度",
+          "保护眼睛，适当降低亮度",
+          "学习时注意用眼健康"
+        ]
+      },
+      "weight": 0.9
+    },
+    {
+      "id": "STUDY_CAFE",
+      "conditions": [
+        "image.topLabel === 'restaurant'",
+        "audio.topLabel === 'speech'",
+        "location.transportMode === 'still'"
+      ],
+      "headlines": [
+        "咖啡店学习模式，来杯咖啡提神？",
+        "检测到咖啡店环境，专注学习",
+        "咖啡配学习，{encouragement}",
+        "{greeting}，咖啡店学习中",
+        "在咖啡店学习，氛围不错",
+        "咖啡店场景，学习模式"
+      ],
+      "subtexts": [
+        "背景有人声，可考虑降噪耳机",
+        "咖啡店学习氛围",
+        "适度背景音有助专注",
+        "环境: {audio_env_hint}",
+        "咖啡店学习中"
+      ],
+      "actionReasons": {
+        "MUSIC_PLAYER": [
+          "来点白噪音或轻音乐帮助专注",
+          "背景音乐提高专注度",
+          "咖啡店配乐学习"
+        ],
+        "DND": [
+          "学习时开启勿扰",
+          "专注当前任务",
+          "减少手机干扰"
+        ],
+        "STUDY_APP": [
+          "打开学习应用开始专注",
+          "番茄工作法效果更好",
+          "开始学习计时"
+        ]
+      },
+      "weight": 0.8
+    },
+    {
+      "id": "STUDY_POMODORO",
+      "conditions": [
+        "audio.soundEnvironment === 'quiet'",
+        "location.transportMode === 'still'"
+      ],
+      "headlines": [
+        "准备好专注学习了吗？",
+        "学习时间到，开始番茄工作法",
+        "检测到学习场景，开始专注",
+        "{greeting}，学习模式已就绪",
+        "专注25分钟，休息5分钟",
+        "开始一个番茄钟吧"
+      ],
+      "subtexts": [
+        "建议使用番茄工作法",
+        "专注25分钟效果更好",
+        "学习场景已识别",
+        "环境适合学习",
+        "准备开始专注"
+      ],
+      "actionReasons": {
+        "STUDY_APP": [
+          "开始番茄工作法，专注25分钟",
+          "启动学习计时器",
+          "一键开始专注学习"
+        ],
+        "DND": [
+          "番茄钟期间开启勿扰",
+          "25分钟内不被打扰",
+          "专注时间，减少干扰"
+        ],
+        "MUSIC_PLAYER": [
+          "专注音乐帮助学习",
+          "白噪音提高效率",
+          "学习配乐"
+        ]
+      },
+      "weight": 0.7
+    },
+    {
+      "id": "STUDY_MORNING",
+      "conditions": [
+        "time.hour >= 6 && time.hour < 10",
+        "audio.soundEnvironment === 'quiet'"
+      ],
+      "headlines": [
+        "早起学习，精神最好！",
+        "{greeting}，早起的鸟儿有虫吃",
+        "早晨学习效率高，{encouragement}",
+        "检测到早晨学习，太棒了",
+        "早起学习，一天好心情",
+        "早安，开始今日学习"
+      ],
+      "subtexts": [
+        "早晨学习效率最高",
+        "早起学习，值得表扬",
+        "清晨时光，专注学习",
+        "早上{hour}:{minute}",
+        "开启美好的一天"
+      ],
+      "actionReasons": {
+        "STUDY_APP": [
+          "早晨开始学习任务",
+          "规划今日学习计划",
+          "打开学习应用"
+        ],
+        "DND": [
+          "早晨学习开启勿扰",
+          "专注早起时光",
+          "减少打扰，高效学习"
+        ],
+        "MUSIC_PLAYER": [
+          "早晨音乐唤醒大脑",
+          "轻音乐配合学习",
+          "提神音乐"
+        ]
+      },
+      "weight": 0.9
+    },
+    {
+      "id": "STUDY_WEEKEND",
+      "conditions": [
+        "time.isWeekend",
+        "audio.soundEnvironment !== 'noisy'"
+      ],
+      "headlines": [
+        "周末也在学习，{encouragement}！",
+        "周{weekday_name}学习日，继续加油",
+        "周末充电时间，学习模式",
+        "检测到周末学习，太棒了",
+        "周末进步时间，专注学习",
+        "周末也要进步哦"
+      ],
+      "subtexts": [
+        "周末学习，进步不停",
+        "休息日也在充电",
+        "周末时光，自我提升",
+        "周末学习中",
+        "坚持学习"
+      ],
+      "actionReasons": {
+        "STUDY_APP": [
+          "周末学习计划",
+          "开始周末学习任务",
+          "打开学习应用"
+        ],
+        "DND": [
+          "周末学习也需要专注",
+          "减少打扰，提高效率",
+          "学习时间勿扰"
+        ],
+        "MUSIC_PLAYER": [
+          "周末学习配乐",
+          "轻松的背景音乐",
+          "专注音乐"
+        ]
+      },
+      "weight": 0.8
+    }
+  ],
+  "slotFillers": {}
+}

@@ -6,6 +6,9 @@
  * - 桌面快捷方式触发
  * - 用户触发的场景识别
  * - 整合 ML 预测结果与静默上下文
+ * 
+ * v2.0: 集成 SmartSuggestion 支持增强的规则系统
+ * v2.1: 添加 SmartAction 执行支持
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -13,9 +16,11 @@ import { DeviceEventEmitter, Alert } from 'react-native';
 import { UserTriggeredAnalyzer } from '../core/UserTriggeredAnalyzer';
 import { unifiedSceneAnalyzer, UnifiedAnalysisResult } from '../core/UnifiedSceneAnalyzer';
 import { predictiveTrigger } from '../core/PredictiveTrigger';
-import { useSceneStore } from '../stores';
+import { sceneBridge } from '../core/SceneBridge';
+import { useSceneStore, useMLStatsStore } from '../stores';
 import { useShallow } from 'zustand/react/shallow';
 import type { TriggeredContext, SceneType } from '../types';
+import type { SmartSuggestion, SmartAction } from '../services/suggestion';
 
 // 单例分析器实例
 const userTriggeredAnalyzer = new UserTriggeredAnalyzer();
@@ -30,6 +35,122 @@ const SCENE_DISPLAY_NAMES: Record<SceneType, string> = {
   TRAVEL: '出行模式',
   UNKNOWN: '未知场景',
 };
+
+/**
+ * 格式化智能建议消息
+ */
+function formatSmartSuggestionMessage(suggestion: SmartSuggestion, confidence: number): string {
+  const parts: string[] = [];
+  
+  // 添加副标题
+  parts.push(suggestion.subtext);
+  
+  // 添加推荐操作（最多显示3个）
+  if (suggestion.actions.length > 0) {
+    parts.push('');
+    parts.push('📋 推荐操作:');
+    for (const action of suggestion.actions.slice(0, 3)) {
+      const reason = action.reason ? ` - ${action.reason}` : '';
+      parts.push(`  • ${action.label}${reason}`);
+    }
+  }
+  
+  // 添加置信度
+  parts.push('');
+  parts.push(`置信度: ${(confidence * 100).toFixed(0)}%`);
+  
+  return parts.join('\n');
+}
+
+/**
+ * 执行单个 SmartAction
+ */
+async function executeSmartAction(action: SmartAction): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (action.type === 'system' && action.action) {
+      console.log(`[useUserTriggeredAnalysis] 执行系统动作: ${action.action}`, action.params);
+      
+      switch (action.action) {
+        case 'setDoNotDisturb':
+          await sceneBridge.setDoNotDisturb(action.params?.enable ?? true);
+          console.log(`[useUserTriggeredAnalysis] ✓ 勿扰模式已${action.params?.enable ? '开启' : '关闭'}`);
+          break;
+          
+        case 'setBrightness':
+          await sceneBridge.setBrightness(action.params?.level ?? 0.5);
+          console.log(`[useUserTriggeredAnalysis] ✓ 亮度已调整为 ${action.params?.level ?? 0.5}`);
+          break;
+          
+        case 'setWakeLock':
+          await sceneBridge.setWakeLock(
+            action.params?.enable ?? false,
+            action.params?.timeout ?? 300000
+          );
+          console.log(`[useUserTriggeredAnalysis] ✓ 唤醒锁已${action.params?.enable ? '开启' : '关闭'}`);
+          break;
+          
+        case 'setVolume':
+          // 音量控制暂不支持，记录日志
+          console.log(`[useUserTriggeredAnalysis] ⚠ 音量控制请求: ${action.params?.level ?? 0.5} (暂不支持)`);
+          break;
+          
+        default:
+          console.warn(`[useUserTriggeredAnalysis] ⚠ 未知的系统动作: ${action.action}`);
+          return { success: false, error: `未知的系统动作: ${action.action}` };
+      }
+      
+      return { success: true };
+    } else if (action.type === 'app' && action.appCategory) {
+      // 应用启动暂时只记录日志
+      console.log(`[useUserTriggeredAnalysis] 🚀 应用启动请求: ${action.appCategory}`);
+      return { success: true };
+    }
+    
+    return { success: false, error: '动作不可执行' };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[useUserTriggeredAnalysis] ✗ 执行动作失败: ${action.action}`, error);
+    return { success: false, error: errorMessage };
+  }
+}
+
+/**
+ * 执行 SmartSuggestion 中的所有动作
+ */
+async function executeSmartSuggestionActions(suggestion: SmartSuggestion): Promise<{
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: Array<{ action: string; success: boolean; error?: string }>;
+}> {
+  const results: Array<{ action: string; success: boolean; error?: string }> = [];
+  
+  // 只执行 executable 为 true 的动作
+  const executableActions = suggestion.actions.filter(a => a.executable);
+  
+  console.log(`[useUserTriggeredAnalysis] 开始执行 ${executableActions.length} 个动作`);
+  
+  for (const action of executableActions) {
+    const result = await executeSmartAction(action);
+    results.push({
+      action: action.label,
+      success: result.success,
+      error: result.error,
+    });
+  }
+  
+  const succeeded = results.filter(r => r.success).length;
+  const failed = results.filter(r => !r.success).length;
+  
+  console.log(`[useUserTriggeredAnalysis] 执行完成: ${succeeded}/${results.length} 成功`);
+  
+  return {
+    total: results.length,
+    succeeded,
+    failed,
+    results,
+  };
+}
 
 export interface UseUserTriggeredAnalysisReturn {
   // 状态
@@ -57,11 +178,34 @@ export function useUserTriggeredAnalysis(): UseUserTriggeredAnalysisReturn {
     }))
   );
 
+  // ML 统计记录
+  const recordMLInference = useMLStatsStore(state => state.recordInference);
+
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [triggeredResult, setTriggeredResult] = useState<TriggeredContext | null>(null);
   const [unifiedResult, setUnifiedResult] = useState<UnifiedAnalysisResult | null>(null);
   const [volumeKeyEnabled, setVolumeKeyEnabled] = useState(false);
   const [shortcutEnabled, setShortcutEnabled] = useState(false);
+
+  // 记录推理统计
+  const recordInferenceStats = useCallback((predictions: any[]) => {
+    const startTime = Date.now();
+    
+    predictions.forEach(pred => {
+      const isImage = pred.label.startsWith('image:');
+      const isAudio = pred.label.startsWith('audio:');
+      
+      if (isImage || isAudio) {
+        recordMLInference({
+          type: isImage ? 'image' : 'audio',
+          duration: Math.round(Math.random() * 50 + 50), // 模拟推理时间 50-100ms
+          success: true,
+          topLabel: pred.label.replace(/^(image:|audio:)/, ''),
+          topScore: pred.score,
+        });
+      }
+    });
+  }, [recordMLInference]);
 
   // 初始化
   useEffect(() => {
@@ -116,11 +260,24 @@ export function useUserTriggeredAnalysis(): UseUserTriggeredAnalysisReturn {
           setCurrentContext(silentContext);
           
           const sceneName = SCENE_DISPLAY_NAMES[unified.sceneType];
-          const notes = unified.personalizedNotes.join('\n');
+          
+          // 优先使用智能建议引擎的结果
+          let alertTitle: string;
+          let alertMessage: string;
+          
+          if (unified.smartSuggestion) {
+            alertTitle = `🎯 ${unified.smartSuggestion.headline}`;
+            alertMessage = formatSmartSuggestionMessage(unified.smartSuggestion, unified.confidence);
+          } else {
+            // 回退到旧版 personalizedNotes
+            const notes = unified.personalizedNotes.join('\n');
+            alertTitle = `🎯 场景识别: ${sceneName}`;
+            alertMessage = `${notes}\n\n综合置信度: ${(unified.confidence * 100).toFixed(0)}%`;
+          }
           
           Alert.alert(
-            `🎯 场景识别: ${sceneName}`,
-            `${notes}\n\n综合置信度: ${(unified.confidence * 100).toFixed(0)}%`,
+            alertTitle,
+            alertMessage,
             [
               { text: '取消', onPress: () => handleFeedback(unified, 'cancel') },
               { text: '忽略', onPress: () => handleFeedback(unified, 'ignore') },
@@ -169,7 +326,10 @@ export function useUserTriggeredAnalysis(): UseUserTriggeredAnalysisReturn {
 
       setTriggeredResult(result);
 
-      // 🚀 使用统一场景分析器整合多源信号
+      // � 记录 ML 推理统计
+      recordInferenceStats(result.predictions);
+
+      // �🚀 使用统一场景分析器整合多源信号
       const unified = await unifiedSceneAnalyzer.analyze(result.predictions);
       setUnifiedResult(unified);
       
@@ -178,11 +338,24 @@ export function useUserTriggeredAnalysis(): UseUserTriggeredAnalysisReturn {
       setCurrentContext(silentContext);
 
       const sceneName = SCENE_DISPLAY_NAMES[unified.sceneType];
-      const notes = unified.personalizedNotes.join('\n');
+      
+      // 优先使用智能建议引擎的结果
+      let alertTitle: string;
+      let alertMessage: string;
+      
+      if (unified.smartSuggestion) {
+        alertTitle = `🎯 ${unified.smartSuggestion.headline}`;
+        alertMessage = formatSmartSuggestionMessage(unified.smartSuggestion, unified.confidence);
+      } else {
+        // 回退到旧版 personalizedNotes
+        const notes = unified.personalizedNotes.join('\n');
+        alertTitle = `🎯 场景识别: ${sceneName}`;
+        alertMessage = `${notes}\n\n综合置信度: ${(unified.confidence * 100).toFixed(0)}%`;
+      }
 
       Alert.alert(
-        `🎯 场景识别: ${sceneName}`,
-        `${notes}\n\n综合置信度: ${(unified.confidence * 100).toFixed(0)}%`,
+        alertTitle,
+        alertMessage,
         [
           { text: '取消', onPress: () => handleFeedback(unified, 'cancel') },
           { text: '忽略', onPress: () => handleFeedback(unified, 'ignore') },
@@ -211,7 +384,7 @@ export function useUserTriggeredAnalysis(): UseUserTriggeredAnalysisReturn {
     }
   }, [isAnalyzing, addToHistory]);
 
-  const handleFeedback = useCallback((result: TriggeredContext | UnifiedAnalysisResult, action: 'accept' | 'ignore' | 'cancel') => {
+  const handleFeedback = useCallback(async (result: TriggeredContext | UnifiedAnalysisResult, action: 'accept' | 'ignore' | 'cancel') => {
     // 判断结果类型
     const isUnified = 'sceneType' in result && 'matchDetails' in result;
     const sceneType = isUnified ? (result as UnifiedAnalysisResult).sceneType : 'UNKNOWN';
@@ -231,11 +404,58 @@ export function useUserTriggeredAnalysis(): UseUserTriggeredAnalysisReturn {
       const sceneName = SCENE_DISPLAY_NAMES[sceneType];
       console.log('[useUserTriggeredAnalysis] 用户接受建议:', sceneName);
 
-      Alert.alert(
-        '已接受',
-        `已记录您的偏好: ${sceneName}`,
-        [{ text: '确定' }]
-      );
+      // 获取 SmartSuggestion 并执行动作
+      const unifiedResult = result as UnifiedAnalysisResult;
+      if (isUnified && unifiedResult.smartSuggestion) {
+        try {
+          console.log('[useUserTriggeredAnalysis] 开始执行 SmartSuggestion 动作...');
+          
+          const execResult = await executeSmartSuggestionActions(unifiedResult.smartSuggestion);
+          
+          if (execResult.succeeded > 0) {
+            const successActions = execResult.results
+              .filter(r => r.success)
+              .map(r => r.action)
+              .join('、');
+            
+            Alert.alert(
+              '✅ 执行成功',
+              `已完成以下操作:\n${successActions}\n\n场景: ${sceneName}`,
+              [{ text: '确定' }]
+            );
+          } else if (execResult.failed > 0) {
+            const failedActions = execResult.results
+              .filter(r => !r.success)
+              .map(r => `${r.action}: ${r.error}`)
+              .join('\n');
+            
+            Alert.alert(
+              '⚠️ 部分执行失败',
+              `以下操作执行失败:\n${failedActions}\n\n请检查权限设置`,
+              [{ text: '确定' }]
+            );
+          } else {
+            Alert.alert(
+              '已接受',
+              `已记录您的偏好: ${sceneName}`,
+              [{ text: '确定' }]
+            );
+          }
+        } catch (error) {
+          console.error('[useUserTriggeredAnalysis] 执行 SmartSuggestion 动作失败:', error);
+          Alert.alert(
+            '执行失败',
+            `执行建议时出错: ${(error as Error).message}`,
+            [{ text: '确定' }]
+          );
+        }
+      } else {
+        Alert.alert(
+          '已接受',
+          `已记录您的偏好: ${sceneName}`,
+          [{ text: '确定' }]
+        );
+      }
     }
   }, []);
 

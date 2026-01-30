@@ -3,6 +3,8 @@
  *
  * 整合静默上下文检测和用户触发检测，将 ML 模型预测结果
  * 映射到统一的 SceneType，并结合动态建议服务生成智能建议
+ * 
+ * v2.0: 集成 SmartSuggestionEngine 支持增强的规则系统
  */
 
 import type {
@@ -16,6 +18,7 @@ import { silentContextEngine } from '../sensors';
 import { dynamicSuggestionService, TimeOfDay } from '../services/DynamicSuggestionService';
 import { feedbackLogger } from '../reflection/FeedbackLogger';
 import { weightAdjuster } from '../reflection/WeightAdjuster';
+import { smartSuggestionEngine, SmartSuggestion } from '../services/suggestion';
 
 /**
  * ML 预测标签到 SceneType 的映射配置
@@ -80,8 +83,10 @@ export interface UnifiedAnalysisResult {
     hour: number;
     isWeekend: boolean;
   };
-  /** 个性化建议文本 */
+  /** 个性化建议文本 (旧版兼容) */
   personalizedNotes: string[];
+  /** 智能建议 (新版增强) */
+  smartSuggestion: SmartSuggestion | null;
   /** 分析时间戳 */
   timestamp: number;
 }
@@ -91,6 +96,7 @@ export interface UnifiedAnalysisResult {
  */
 class UnifiedSceneAnalyzerClass {
   private initialized = false;
+  private smartEngineEnabled = true; // 是否使用新版智能建议引擎
 
   /**
    * 初始化
@@ -101,6 +107,16 @@ class UnifiedSceneAnalyzerClass {
     await dynamicSuggestionService.initialize();
     await feedbackLogger.initialize();
     await weightAdjuster.initialize();
+    
+    // 初始化智能建议引擎
+    try {
+      await smartSuggestionEngine.initialize();
+      this.smartEngineEnabled = true;
+      console.log('[UnifiedSceneAnalyzer] SmartSuggestionEngine 初始化完成');
+    } catch (error) {
+      console.warn('[UnifiedSceneAnalyzer] SmartSuggestionEngine 初始化失败，使用旧版:', error);
+      this.smartEngineEnabled = false;
+    }
 
     this.initialized = true;
     console.log('[UnifiedSceneAnalyzer] 初始化完成');
@@ -167,6 +183,22 @@ class UnifiedSceneAnalyzerClass {
     // 6. 生成个性化建议
     const personalizedNotes = this.generatePersonalizedNotes(finalScene, timeContext, finalConfidence);
 
+    // 7. 使用智能建议引擎生成增强建议
+    let smartSuggestion: SmartSuggestion | null = null;
+    if (this.smartEngineEnabled) {
+      try {
+        smartSuggestion = await smartSuggestionEngine.generate(
+          finalScene,
+          finalConfidence,
+          silentContext,
+          triggeredPredictions || null
+        );
+        console.log('[UnifiedSceneAnalyzer] 智能建议生成成功:', smartSuggestion.subSceneId);
+      } catch (error) {
+        console.warn('[UnifiedSceneAnalyzer] 智能建议生成失败:', error);
+      }
+    }
+
     console.log('[UnifiedSceneAnalyzer] 最终场景:', finalScene, '置信度:', finalConfidence.toFixed(2));
 
     return {
@@ -177,6 +209,7 @@ class UnifiedSceneAnalyzerClass {
       matchDetails,
       timeContext,
       personalizedNotes,
+      smartSuggestion,
       timestamp,
     };
   }
