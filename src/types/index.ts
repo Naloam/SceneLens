@@ -530,3 +530,24 @@ export interface SuggestionExecutionResult {
   fallbackApplied: boolean;
   timestamp: number;
 }
+
+// ==================== 自动化类型导出 ====================
+
+export type {
+  VolumeSettings,
+  BrightnessSettings,
+  DoNotDisturbSettings,
+  SystemState,
+  AutomationRule,
+  AutomationCondition,
+  AutomationAction,
+  RuleExecutionResult,
+  QuickAction,
+  ActionCategory,
+  ScenePreset,
+} from './automation';
+
+export {
+  DEFAULT_SCENE_PRESETS,
+} from './automation';
+
