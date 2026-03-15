@@ -1,41 +1,42 @@
 /**
- * PredictionCard - 预测卡片组件
- * 
- * 显示场景预测、出发提醒等预测性信息
+ * PredictionCard - 预测卡片组件 (主题动态适配版)
  */
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Text, Card, Button, ActivityIndicator, Surface, IconButton } from 'react-native-paper';
+import { 
+  Text, 
+  Card, 
+  Button, 
+  ActivityIndicator, 
+  Surface, 
+  IconButton, 
+  useTheme 
+} from 'react-native-paper';
 import { contextPredictor } from '../../prediction/ContextPredictor';
-import { getSceneColor, getSceneContainerColor } from '../../theme/colors';
-import { spacing } from '../../theme/spacing';
+import { getSceneContainerColor } from '../../theme/colors';
+import { spacing, borderRadius } from '../../theme/spacing';
 import type { SceneType } from '../../types';
 import type { ScenePrediction, DepartureReminder } from '../../prediction/types';
 
-// ==================== 场景配置 ====================
-
-const sceneIcons: Record<SceneType, string> = {
-  COMMUTE: '🚇',
-  OFFICE: '🏢',
-  HOME: '🏠',
-  STUDY: '📚',
-  SLEEP: '😴',
-  TRAVEL: '✈️',
-  UNKNOWN: '❓',
+const sceneIcons: Record<SceneType, string> = { 
+  COMMUTE: '🚇', 
+  OFFICE: '🏢', 
+  HOME: '🏠', 
+  STUDY: '📚', 
+  SLEEP: '😴', 
+  TRAVEL: '✈️', 
+  UNKNOWN: '❓' 
 };
 
-const sceneLabels: Record<SceneType, string> = {
-  COMMUTE: '通勤',
-  OFFICE: '办公室',
-  HOME: '家',
-  STUDY: '学习',
-  SLEEP: '睡眠',
-  TRAVEL: '出行',
-  UNKNOWN: '未知',
+const sceneLabels: Record<SceneType, string> = { 
+  COMMUTE: '通勤', 
+  OFFICE: '办公室', 
+  HOME: '家', 
+  STUDY: '学习', 
+  SLEEP: '睡眠', 
+  TRAVEL: '出行', 
+  UNKNOWN: '未知' 
 };
-
-// ==================== Props 定义 ====================
 
 export interface PredictionCardProps {
   currentScene: SceneType;
@@ -43,32 +44,24 @@ export interface PredictionCardProps {
   onDepartureReminderTap?: (reminder: DepartureReminder) => void;
 }
 
-// ==================== 组件实现 ====================
-
-export const PredictionCard: React.FC<PredictionCardProps> = ({
-  currentScene,
-  onPredictionTap,
-  onDepartureReminderTap,
+export const PredictionCard: React.FC<PredictionCardProps> = ({ 
+  currentScene, 
+  onPredictionTap, 
+  onDepartureReminderTap 
 }) => {
+  const theme = useTheme();
   const [loading, setLoading] = useState(true);
   const [prediction, setPrediction] = useState<ScenePrediction | null>(null);
   const [departureReminder, setDepartureReminder] = useState<DepartureReminder | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  // 加载预测数据
   const loadPredictions = useCallback(async () => {
     setLoading(true);
     try {
       await contextPredictor.initialize();
-      
-      // 获取下一场景预测
-      const nextScene = await contextPredictor.predictTimeToNextScene(currentScene);
-      setPrediction(nextScene);
-      
-      // 获取出发提醒
+      setPrediction(await contextPredictor.predictTimeToNextScene(currentScene));
       const reminder = await contextPredictor.shouldRemindDeparture(currentScene);
       setDepartureReminder(reminder.shouldRemind ? reminder : null);
-      
     } catch (error) {
       console.error('[PredictionCard] Failed to load predictions:', error);
     } finally {
@@ -76,84 +69,118 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
     }
   }, [currentScene]);
 
-  useEffect(() => {
-    loadPredictions();
-  }, [loadPredictions]);
-
-  // 刷新预测
-  const handleRefresh = useCallback(() => {
-    loadPredictions();
+  useEffect(() => { 
+    loadPredictions(); 
   }, [loadPredictions]);
 
   return (
-    <Card mode="elevated" style={styles.card}>
-      <Card.Content>
-        {/* 标题栏 */}
+    <Card 
+      mode="elevated" 
+      elevation={1} 
+      style={[
+        styles.card, 
+        { 
+          borderRadius: borderRadius.xl, 
+          backgroundColor: theme.colors.surface 
+        }
+      ]}
+    >
+      <Card.Content style={styles.cardContent}>
         <View style={styles.header}>
-          <View style={styles.titleRow}>
-            <Text style={styles.headerIcon}>🔮</Text>
-            <Text variant="titleMedium" style={styles.headerTitle}>
-              智能预测
-            </Text>
-          </View>
-          <IconButton
-            icon={expanded ? 'chevron-up' : 'chevron-down'}
-            size={20}
-            onPress={() => setExpanded(!expanded)}
+          <Text 
+            variant="titleMedium" 
+            style={[styles.headerTitle, { color: theme.colors.onSurfaceVariant }]}
+          >
+           🔮 行为模式预测
+          </Text>
+          <IconButton 
+            icon={expanded ? 'chevron-up' : 'chevron-down'} 
+            size={22} 
+            iconColor={theme.colors.onSurfaceVariant} 
+            onPress={() => setExpanded(!expanded)} 
+            style={styles.iconButton} 
           />
         </View>
 
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" />
-            <Text variant="bodySmall" style={styles.loadingText}>
-              分析中...
+            <ActivityIndicator size="small" color={theme.colors.primary} />
+            <Text 
+              variant="bodySmall" 
+              style={{ color: theme.colors.onSurfaceVariant, marginTop: spacing.sm }}
+            >
+              正在分析历史习惯...
             </Text>
           </View>
         ) : !prediction && !departureReminder ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyIcon}>📊</Text>
-            <Text variant="bodyMedium" style={styles.emptyTitle}>
-              正在学习您的习惯
+            <Text 
+              variant="titleSmall" 
+              style={{ color: theme.colors.onSurfaceVariant, marginBottom: 4 }}
+            >
+              数据积累中
             </Text>
-            <Text variant="bodySmall" style={styles.emptyText}>
-              使用几天后，这里将显示智能预测和出发提醒
+            <Text 
+              variant="bodySmall" 
+              style={{ 
+                color: theme.colors.onSurfaceVariant, 
+                opacity: 0.7, 
+                textAlign: 'center' 
+              }}
+            >
+              系统需要几天时间学习您的日常习惯以提供精准预测
             </Text>
           </View>
         ) : (
-          <View>
-            {/* 出发提醒 - 优先显示 */}
+          <View style={styles.contentSection}>
             {departureReminder && (
-              <Surface style={styles.reminderSurface} elevation={1}>
+              <Surface 
+                style={[
+                  styles.reminderSurface, 
+                  { backgroundColor: theme.colors.tertiaryContainer }
+                ]} 
+                elevation={0}
+              >
                 <View style={styles.reminderContent}>
                   <Text style={styles.reminderIcon}>⏰</Text>
                   <View style={styles.reminderTextContainer}>
-                    <Text variant="titleSmall" style={styles.reminderTitle}>
+                    <Text 
+                      variant="titleSmall" 
+                      style={{ color: theme.colors.onTertiaryContainer, fontWeight: '700' }}
+                    >
                       出发提醒
                     </Text>
-                    <Text variant="bodySmall" style={styles.reminderMessage}>
+                    <Text 
+                      variant="bodySmall" 
+                      style={{ 
+                        color: theme.colors.onTertiaryContainer, 
+                        marginTop: 2, 
+                        opacity: 0.9 
+                      }}
+                    >
                       {departureReminder.message}
                     </Text>
                   </View>
                 </View>
                 {onDepartureReminderTap && (
                   <Button 
-                    mode="contained-tonal" 
+                    mode="text" 
                     compact 
-                    onPress={() => onDepartureReminderTap(departureReminder)}
-                    style={styles.reminderButton}
+                    onPress={() => onDepartureReminderTap(departureReminder)} 
+                    labelStyle={{ color: theme.colors.tertiary }} 
+                    style={{ alignSelf: 'flex-end' }}
                   >
-                    查看
+                    处理
                   </Button>
                 )}
               </Surface>
             )}
 
-            {/* 场景预测 */}
             {prediction && (
               <Surface 
                 style={[
-                  styles.predictionSurface,
+                  styles.predictionSurface, 
                   { backgroundColor: getSceneContainerColor(prediction.sceneType) }
                 ]} 
                 elevation={0}
@@ -164,76 +191,98 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
                       {sceneIcons[prediction.sceneType]}
                     </Text>
                     <View style={styles.predictionTextContainer}>
-                      <Text variant="bodyMedium" style={styles.predictionLabel}>
+                      <Text 
+                        variant="bodySmall" 
+                        style={{ color: theme.colors.onSurfaceVariant, fontWeight: '500' }}
+                      >
                         预计 {prediction.minutesUntil} 分钟后
                       </Text>
-                      <Text variant="titleMedium" style={styles.predictionScene}>
-                        进入{sceneLabels[prediction.sceneType]}
+                      <Text 
+                        variant="titleMedium" 
+                        style={{ color: theme.colors.onSurface, fontWeight: '800', marginTop: 2 }}
+                      >
+                        进入 {sceneLabels[prediction.sceneType]}
                       </Text>
                     </View>
                   </View>
                   <View style={styles.predictionRight}>
-                    <Text variant="bodySmall" style={styles.predictionTime}>
+                    <Text 
+                      variant="titleLarge" 
+                      style={{ color: theme.colors.primary, fontWeight: '800' }}
+                    >
                       {prediction.predictedTime}
                     </Text>
-                    <Text variant="labelSmall" style={styles.predictionConfidence}>
+                    <Text 
+                      variant="labelSmall" 
+                      style={{ color: theme.colors.onSurfaceVariant }}
+                    >
                       置信度 {(prediction.confidence * 100).toFixed(0)}%
                     </Text>
                   </View>
                 </View>
-                {onPredictionTap && (
-                  <Button 
-                    mode="text" 
-                    compact 
-                    onPress={() => onPredictionTap(prediction)}
-                    style={styles.predictionButton}
-                  >
-                    详情
-                  </Button>
-                )}
               </Surface>
             )}
 
-            {/* 展开时显示更多信息 */}
             {expanded && (
               <View style={styles.expandedContent}>
-                <Text variant="labelSmall" style={styles.expandedLabel}>
-                  预测统计
+                <Text 
+                  variant="labelSmall" 
+                  style={[styles.expandedLabel, { color: theme.colors.primary }]}
+                >
+                  预测模型指标
                 </Text>
-                <View style={styles.statsRow}>
+                <View style={[styles.statsRow, { backgroundColor: theme.colors.surfaceVariant }]}>
                   <View style={styles.statItem}>
-                    <Text variant="bodySmall" style={styles.statLabel}>
+                    <Text 
+                      variant="bodySmall" 
+                      style={{ color: theme.colors.onSurfaceVariant }}
+                    >
                       通勤估计
                     </Text>
-                    <Text variant="titleSmall" style={styles.statValue}>
-                      {contextPredictor.getStats().commuteEstimate} 分钟
+                    <Text 
+                      variant="titleMedium" 
+                      style={{ color: theme.colors.onSurface, fontWeight: '700' }}
+                    >
+                      {contextPredictor.getStats().commuteEstimate}m
                     </Text>
                   </View>
                   <View style={styles.statItem}>
-                    <Text variant="bodySmall" style={styles.statLabel}>
+                    <Text 
+                      variant="bodySmall" 
+                      style={{ color: theme.colors.onSurfaceVariant }}
+                    >
                       时间模式
                     </Text>
-                    <Text variant="titleSmall" style={styles.statValue}>
-                      {contextPredictor.getStats().timePatternStats.totalPatterns} 个
+                    <Text 
+                      variant="titleMedium" 
+                      style={{ color: theme.colors.onSurface, fontWeight: '700' }}
+                    >
+                      {contextPredictor.getStats().timePatternStats.totalPatterns}
                     </Text>
                   </View>
                   <View style={styles.statItem}>
-                    <Text variant="bodySmall" style={styles.statLabel}>
+                    <Text 
+                      variant="bodySmall" 
+                      style={{ color: theme.colors.onSurfaceVariant }}
+                    >
                       行为模式
                     </Text>
-                    <Text variant="titleSmall" style={styles.statValue}>
-                      {contextPredictor.getStats().behaviorStats.totalPatterns} 个
+                    <Text 
+                      variant="titleMedium" 
+                      style={{ color: theme.colors.onSurface, fontWeight: '700' }}
+                    >
+                      {contextPredictor.getStats().behaviorStats.totalPatterns}
                     </Text>
                   </View>
                 </View>
                 <Button 
-                  mode="outlined" 
+                  mode="contained-tonal" 
                   compact 
-                  onPress={handleRefresh}
-                  style={styles.refreshButton}
+                  onPress={loadPredictions} 
+                  style={styles.refreshButton} 
                   icon="refresh"
                 >
-                  刷新预测
+                  重新分析
                 </Button>
               </View>
             )}
@@ -244,155 +293,99 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
   );
 };
 
-// ==================== 样式 ====================
-
 const styles = StyleSheet.create({
-  card: {
-    marginHorizontal: spacing.md,
-    marginVertical: spacing.sm,
+  card: {},
+  cardContent: { 
+    padding: spacing.md 
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
+  header: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: spacing.xs 
   },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  headerTitle: { 
+    fontWeight: '600', 
+    letterSpacing: 0.5 
   },
-  headerIcon: {
-    fontSize: 20,
-    marginRight: spacing.xs,
+  iconButton: { 
+    margin: 0 
   },
-  headerTitle: {
-    fontWeight: '600',
+  loadingContainer: { 
+    alignItems: 'center', 
+    paddingVertical: spacing.xl 
   },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
+  emptyContainer: { 
+    alignItems: 'center', 
+    paddingVertical: spacing.lg, 
+    paddingHorizontal: spacing.xl 
   },
-  loadingText: {
-    marginLeft: spacing.sm,
-    color: '#666',
+  emptyIcon: { 
+    fontSize: 36, 
+    marginBottom: spacing.sm 
   },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.lg,
+  contentSection: { 
+    gap: spacing.sm 
   },
-  emptyIcon: {
-    fontSize: 40,
-    marginBottom: spacing.sm,
+  reminderSurface: { 
+    borderRadius: borderRadius.lg, 
+    padding: spacing.md 
   },
-  emptyTitle: {
-    fontWeight: '600',
-    marginBottom: spacing.xs,
+  reminderContent: { 
+    flexDirection: 'row', 
+    alignItems: 'flex-start' 
   },
-  emptyText: {
-    color: '#666',
-    textAlign: 'center',
+  reminderIcon: { 
+    fontSize: 24, 
+    marginRight: spacing.sm 
   },
-  reminderSurface: {
-    borderRadius: 12,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    backgroundColor: '#FFF3E0',
+  reminderTextContainer: { 
+    flex: 1 
   },
-  reminderContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  predictionSurface: { 
+    borderRadius: borderRadius.lg, 
+    padding: spacing.md 
   },
-  reminderIcon: {
-    fontSize: 24,
-    marginRight: spacing.sm,
+  predictionContent: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center' 
   },
-  reminderTextContainer: {
-    flex: 1,
+  predictionLeft: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    flex: 1 
   },
-  reminderTitle: {
-    fontWeight: '600',
-    color: '#E65100',
+  predictionIcon: { 
+    fontSize: 36, 
+    marginRight: spacing.md 
   },
-  reminderMessage: {
-    color: '#F57C00',
-    marginTop: 2,
+  predictionTextContainer: { 
+    flex: 1 
   },
-  reminderButton: {
-    marginTop: spacing.sm,
-    alignSelf: 'flex-end',
+  predictionRight: { 
+    alignItems: 'flex-end' 
   },
-  predictionSurface: {
-    borderRadius: 12,
-    padding: spacing.md,
-    marginBottom: spacing.xs,
+  expandedContent: { 
+    marginTop: spacing.xs 
   },
-  predictionContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  expandedLabel: { 
+    marginBottom: spacing.xs, 
+    fontWeight: '600' 
   },
-  predictionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
+  statsRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-around', 
+    paddingVertical: spacing.md, 
+    borderRadius: borderRadius.lg, 
+    marginBottom: spacing.md 
   },
-  predictionIcon: {
-    fontSize: 32,
-    marginRight: spacing.sm,
+  statItem: { 
+    alignItems: 'center' 
   },
-  predictionTextContainer: {
-    flex: 1,
-  },
-  predictionLabel: {
-    color: '#666',
-  },
-  predictionScene: {
-    fontWeight: '600',
-  },
-  predictionRight: {
-    alignItems: 'flex-end',
-  },
-  predictionTime: {
-    fontWeight: '600',
-    fontSize: 18,
-  },
-  predictionConfidence: {
-    color: '#666',
-  },
-  predictionButton: {
-    marginTop: spacing.xs,
-    alignSelf: 'flex-end',
-  },
-  expandedContent: {
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-  },
-  expandedLabel: {
-    color: '#666',
-    marginBottom: spacing.sm,
-    textTransform: 'uppercase',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: spacing.md,
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statLabel: {
-    color: '#666',
-  },
-  statValue: {
-    fontWeight: '600',
-  },
-  refreshButton: {
-    alignSelf: 'center',
+  refreshButton: { 
+    alignSelf: 'center', 
+    borderRadius: borderRadius.lg 
   },
 });
 

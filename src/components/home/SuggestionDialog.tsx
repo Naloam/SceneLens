@@ -4,8 +4,8 @@
 
 import React from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
-import { Text, Dialog, Portal, Button, Surface, List } from 'react-native-paper';
-import { spacing } from '../../theme/spacing';
+import { Text, Dialog, Portal, Button, Surface, List, useTheme } from 'react-native-paper';
+import { spacing, borderRadius } from '../../theme/spacing';
 import type { SceneSuggestionPackage, TriggeredContext } from '../../types';
 
 /**
@@ -38,6 +38,10 @@ export const SuggestionDialog: React.FC<SuggestionDialogProps> = ({
   onConfirm,
   onCancel,
 }) => {
+  const theme = useTheme();
+  // 极淡主题色背景，约 4% 透明度
+  const ultraLightBg = theme.colors.primary + '0A';
+
   if (!suggestion) {
     return null;
   }
@@ -47,7 +51,8 @@ export const SuggestionDialog: React.FC<SuggestionDialogProps> = ({
       <Dialog
         visible={visible}
         onDismiss={onCancel}
-        style={styles.dialog}
+        // 👉 核心修复 1：强行白底消灭紫灰遮罩，统一家族式大圆角
+        style={[styles.dialog, { backgroundColor: theme.colors.surface }]}
       >
         <Dialog.Title style={styles.dialogTitle}>
           <View style={styles.dialogTitleRow}>
@@ -63,7 +68,9 @@ export const SuggestionDialog: React.FC<SuggestionDialogProps> = ({
               </Text>
             </Surface>
             <View style={styles.dialogTitleText}>
-              <Text variant="titleLarge">{suggestion.displayName}模式</Text>
+              <Text variant="titleLarge" style={{ fontWeight: '800', color: theme.colors.onSurface }}>
+                {suggestion.displayName}模式
+              </Text>
               <Text variant="bodyMedium" style={styles.dialogSubtitle}>
                 已为您准备相关操作
               </Text>
@@ -72,20 +79,22 @@ export const SuggestionDialog: React.FC<SuggestionDialogProps> = ({
         </Dialog.Title>
 
         <Dialog.ScrollArea style={styles.dialogScrollArea}>
-          <ScrollView>
+          {/* 👉 核心修复 2：由 ScrollView 内部接管排版，强制留出 24px 的呼吸边距 */}
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            
             {/* AI 识别结果 */}
             {triggeredResult && triggeredResult.predictions.length > 0 && (
               <View style={styles.dialogSection}>
                 <Text variant="titleSmall" style={styles.dialogSectionTitle}>
                   🤖 AI 识别结果
                 </Text>
-                <Surface style={styles.aiResultBox} elevation={0}>
+                <Surface style={[styles.infoBox, { backgroundColor: ultraLightBg }]} elevation={0}>
                   {triggeredResult.predictions.slice(0, 3).map((pred, index) => (
                     <View key={index} style={styles.dialogPredictionItem}>
-                      <Text variant="bodyMedium" style={styles.dialogPredictionLabel}>
+                      <Text variant="bodyMedium" style={{ flex: 1, color: theme.colors.onSurface, fontWeight: '500' }}>
                         {index + 1}. {pred.label.replace(/^(image:|audio:)/, '')}
                       </Text>
-                      <Text variant="bodyMedium" style={styles.dialogPredictionScore}>
+                      <Text variant="bodyMedium" style={{ fontWeight: '700', color: theme.colors.primary }}>
                         {(pred.score * 100).toFixed(1)}%
                       </Text>
                     </View>
@@ -94,55 +103,57 @@ export const SuggestionDialog: React.FC<SuggestionDialogProps> = ({
               </View>
             )}
 
-            {/* 检测要点 */}
+            {/* 检测要点 - 包装在淡色背景中 */}
             {suggestion.detectionHighlights.length > 0 && (
               <View style={styles.dialogSection}>
                 <Text variant="titleSmall" style={styles.dialogSectionTitle}>
                   检测要点
                 </Text>
-                {suggestion.detectionHighlights.map((highlight, index) => (
-                  <View key={index} style={styles.dialogHighlightItem}>
-                    <Text style={styles.dialogHighlightBullet}>•</Text>
-                    <Text variant="bodyMedium" style={styles.dialogHighlightText}>
-                      {highlight}
-                    </Text>
-                  </View>
-                ))}
+                <Surface style={[styles.infoBox, { backgroundColor: ultraLightBg }]} elevation={0}>
+                  {suggestion.detectionHighlights.map((highlight, index) => (
+                    <View key={index} style={styles.dialogHighlightItem}>
+                      <Text style={[styles.dialogHighlightBullet, { color: theme.colors.primary }]}>•</Text>
+                      <Text variant="bodyMedium" style={styles.dialogHighlightText}>
+                        {highlight}
+                      </Text>
+                    </View>
+                  ))}
+                </Surface>
               </View>
             )}
 
-            {/* 系统调整项 */}
+            {/* 系统调整项 - 采用浅灰色层级包裹 */}
             {suggestion.systemAdjustments.length > 0 && (
               <View style={styles.dialogSection}>
                 <Text variant="titleSmall" style={styles.dialogSectionTitle}>
                   系统调整
                 </Text>
                 {suggestion.systemAdjustments.map((adjustment) => (
-                  <List.Item
-                    key={adjustment.id}
-                    title={adjustment.label}
-                    description={adjustment.description}
-                    left={(props) => <List.Icon {...props} icon="cog" />}
-                    style={styles.dialogListItem}
-                  />
+                  <Surface key={adjustment.id} style={[styles.itemBox, { backgroundColor: theme.colors.surfaceVariant, opacity: 0.8 }]} elevation={0}>
+                    <List.Icon icon="cog" color={theme.colors.onSurfaceVariant} style={styles.listIcon} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '700', color: theme.colors.onSurface, marginBottom: 2 }}>{adjustment.label}</Text>
+                      <Text style={{ fontSize: 12, color: theme.colors.onSurfaceVariant }}>{adjustment.description}</Text>
+                    </View>
+                  </Surface>
                 ))}
               </View>
             )}
 
-            {/* 应用启动项 */}
+            {/* 应用启动项 - 采用浅灰色层级包裹 */}
             {suggestion.appLaunches.length > 0 && (
               <View style={styles.dialogSection}>
                 <Text variant="titleSmall" style={styles.dialogSectionTitle}>
                   应用启动
                 </Text>
                 {suggestion.appLaunches.map((appLaunch) => (
-                  <List.Item
-                    key={appLaunch.id}
-                    title={appLaunch.label}
-                    description={appLaunch.description}
-                    left={(props) => <List.Icon {...props} icon="application" />}
-                    style={styles.dialogListItem}
-                  />
+                  <Surface key={appLaunch.id} style={[styles.itemBox, { backgroundColor: theme.colors.surfaceVariant, opacity: 0.8 }]} elevation={0}>
+                    <List.Icon icon="application" color={theme.colors.onSurfaceVariant} style={styles.listIcon} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '700', color: theme.colors.onSurface, marginBottom: 2 }}>{appLaunch.label}</Text>
+                      <Text style={{ fontSize: 12, color: theme.colors.onSurfaceVariant }}>{appLaunch.description}</Text>
+                    </View>
+                  </Surface>
                 ))}
               </View>
             )}
@@ -153,7 +164,8 @@ export const SuggestionDialog: React.FC<SuggestionDialogProps> = ({
           <Button
             onPress={onCancel}
             disabled={executing}
-            mode="outlined"
+            textColor={theme.colors.onSurfaceVariant}
+            style={styles.actionButton}
           >
             取消
           </Button>
@@ -162,9 +174,10 @@ export const SuggestionDialog: React.FC<SuggestionDialogProps> = ({
             loading={executing}
             disabled={executing}
             mode="contained"
-            icon="check"
+            buttonColor={theme.colors.primary}
+            style={[styles.actionButton, { paddingHorizontal: 8 }]}
           >
-            执行
+            ✓ 执行
           </Button>
         </Dialog.Actions>
       </Dialog>
@@ -173,12 +186,14 @@ export const SuggestionDialog: React.FC<SuggestionDialogProps> = ({
 };
 
 const styles = StyleSheet.create({
+  // 👉 弹窗圆角对齐首页卡片的 borderRadius.xl (这里硬编码 28 避免你那边 spacing 配置不同)
   dialog: {
-    maxHeight: '80%',
-    borderRadius: 16,
+    maxHeight: '85%',
+    borderRadius: 28,
   },
   dialogTitle: {
-    paddingBottom: 0,
+    paddingBottom: 24,
+    paddingTop: 24,
   },
   dialogTitleRow: {
     flexDirection: 'row',
@@ -190,7 +205,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 16,
   },
   dialogIcon: {
     fontSize: 24,
@@ -200,38 +215,49 @@ const styles = StyleSheet.create({
   },
   dialogSubtitle: {
     color: '#666',
-    marginTop: 2,
+    marginTop: 4,
   },
   dialogScrollArea: {
     paddingHorizontal: 0,
-    maxHeight: 400,
+    borderTopWidth: 0, // 隐藏默认的分割线更显高级
+    borderBottomWidth: 0,
+  },
+  scrollContent: {
+    paddingHorizontal: 24, // 👈 解决贴边的致命武器
+    paddingBottom: 16,
   },
   dialogSection: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   dialogSectionTitle: {
-    fontWeight: '600',
-    marginBottom: 8,
+    fontWeight: '700',
+    marginBottom: 10,
     color: '#424242',
+    opacity: 0.6,
   },
-  aiResultBox: {
+  
+  // 👉 新增的层级包裹块
+  infoBox: {
+    padding: 16,
+    borderRadius: 16,
+  },
+  itemBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#F0F4FF',
+    borderRadius: 16,
     marginBottom: 8,
   },
+  listIcon: {
+    margin: 0,
+    marginRight: 12,
+  },
+  
   dialogPredictionItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 4,
-  },
-  dialogPredictionLabel: {
-    flex: 1,
-  },
-  dialogPredictionScore: {
-    fontWeight: '600',
-    color: '#1976D2',
   },
   dialogHighlightItem: {
     flexDirection: 'row',
@@ -240,19 +266,21 @@ const styles = StyleSheet.create({
   },
   dialogHighlightBullet: {
     marginRight: 8,
-    color: '#666',
+    fontWeight: '900',
   },
   dialogHighlightText: {
     flex: 1,
-    color: '#424242',
-  },
-  dialogListItem: {
-    paddingHorizontal: 0,
+    lineHeight: 20,
+    color: '#333',
   },
   dialogActions: {
     paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingBottom: 16,
+    paddingTop: 12,
     gap: 8,
+  },
+  actionButton: {
+    borderRadius: 12,
   },
 });
 

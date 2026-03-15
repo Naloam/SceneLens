@@ -10,159 +10,65 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
-import {
-  Card,
-  Text,
-  List,
-  Button,
-  Divider,
-  Surface,
-  Chip,
-  IconButton,
-  ProgressBar,
-} from 'react-native-paper';
+import { View, StyleSheet } from 'react-native';
+import { Card, Text, List, Button, Divider, Surface, IconButton, ProgressBar, useTheme } from 'react-native-paper';
 import type { SceneSuggestionPackage, OneTapAction, SuggestionExecutionResult } from '../../types';
 import { sceneSuggestionManager } from '../../services/SceneSuggestionManager';
 import { notificationManager } from '../../notifications/NotificationManager';
-import { spacing } from '../../theme/spacing';
+import { spacing, borderRadius } from '../../theme/spacing';
 
-/**
- * 组件属性
- */
+const sceneIcons: Record<string, string> = { COMMUTE: '🚇', OFFICE: '🏢', HOME: '🏠', MEETING: '📅', STUDY: '📚', SLEEP: '😴', TRAVEL: '✈️', UNKNOWN: '❓' };
+const actionIcons: Record<string, string> = { execute: 'check-circle', skip: 'close-circle', snooze: 'clock-outline', dismiss: 'cancel' };
+
 export interface SceneSuggestionCardProps {
-  /** 场景执行建议包 */
   scenePackage: SceneSuggestionPackage;
-  /** 置信度（可选，用于显示进度条） */
   confidence?: number;
-  /** 是否显示详细信息（默认展开） */
   expanded?: boolean;
-  /** 执行完成回调 */
   onExecutionComplete?: (result: SuggestionExecutionResult) => void;
-  /** 样式 */
   style?: any;
-  /** 是否隐藏检测要点 */
   hideHighlights?: boolean;
-  /** 是否隐藏降级说明 */
   hideFallbackNotes?: boolean;
 }
 
-/**
- * 场景图标映射（使用 emoji）
- */
-const sceneIcons: Record<string, string> = {
-  COMMUTE: '🚇',
-  OFFICE: '🏢',
-  HOME: '🏠',
-  MEETING: '📅',
-  STUDY: '📚',
-  SLEEP: '😴',
-  TRAVEL: '✈️',
-  UNKNOWN: '❓',
-};
-
-/**
- * 操作图标映射
- */
-const actionIcons: Record<string, string> = {
-  execute: 'check-circle',
-  skip: 'close-circle',
-  snooze: 'clock-outline',
-  dismiss: 'cancel',
-};
-
 export const SceneSuggestionCard: React.FC<SceneSuggestionCardProps> = ({
-  scenePackage,
-  confidence,
-  expanded: initialExpanded = true,
-  onExecutionComplete,
-  style,
-  hideHighlights = false,
-  hideFallbackNotes = true,
+  scenePackage, confidence, expanded: initialExpanded = true,
+  onExecutionComplete, style, hideHighlights = false, hideFallbackNotes = true,
 }) => {
+  const theme = useTheme();
   const [expanded, setExpanded] = useState(initialExpanded);
   const [executing, setExecuting] = useState(false);
   const [executedActionId, setExecutedActionId] = useState<string | null>(null);
   const [showFallback, setShowFallback] = useState(false);
 
-  /**
-   * 处理一键操作
-   */
   const handleAction = async (action: OneTapAction) => {
     setExecuting(true);
     setExecutedActionId(action.id);
-
     try {
-      const result = await sceneSuggestionManager.executeSuggestion(
-        scenePackage.sceneId,
-        action.id,
-        {
-          showProgress: true,
-          autoFallback: true,
-        }
-      );
-
-      // 计算实际成功的操作数量
+      const result = await sceneSuggestionManager.executeSuggestion(scenePackage.sceneId, action.id, { showProgress: true, autoFallback: true });
       const successCount = result.executedActions.filter(a => a.success).length;
-      const totalAttempted = result.executedActions.length;
-      const totalActions = totalAttempted + result.skippedActions.length;
-
-      // 显示执行结果通知
-      await notificationManager.showSuggestionExecutionResult(
-        scenePackage,
-        result.success,
-        successCount,
-        totalActions,
-        result.skippedActions.length
-      );
-
-      // 如果应用了降级策略，显示降级说明
-      if (result.fallbackApplied && !hideFallbackNotes) {
-        setShowFallback(true);
-      }
-
-      // 触发回调
+      const totalActions = result.executedActions.length + result.skippedActions.length;
+      await notificationManager.showSuggestionExecutionResult(scenePackage, result.success, successCount, totalActions, result.skippedActions.length);
+      if (result.fallbackApplied && !hideFallbackNotes) setShowFallback(true);
       onExecutionComplete?.(result);
-    } catch (error) {
-      console.error('[SceneSuggestionCard] 执行失败:', error);
-    } finally {
-      setExecuting(false);
-    }
+    } catch (error) {} finally { setExecuting(false); }
   };
 
-  /**
-   * 获取操作按钮样式
-   */
-  const getButtonMode = (action: OneTapAction): 'contained' | 'outlined' | 'text' => {
+  const getButtonMode = (action: OneTapAction) => {
     if (action.type === 'primary') return 'contained';
-    if (action.type === 'secondary') return 'outlined';
+    if (action.type === 'secondary') return 'contained-tonal';
     return 'text';
   };
 
-  /**
-   * 渲染检测要点
-   */
   const renderHighlights = () => {
-    if (hideHighlights || scenePackage.detectionHighlights.length === 0) {
-      return null;
-    }
-
+    if (hideHighlights || scenePackage.detectionHighlights.length === 0) return null;
     return (
       <View style={styles.section}>
-        <Text variant="titleSmall" style={styles.sectionTitle}>
-          检测要点
-        </Text>
+        <Text variant="titleSmall" style={[styles.sectionTitle, { color: theme.colors.onSurfaceVariant }]}>感知要点</Text>
         <View style={styles.highlightsContainer}>
           {scenePackage.detectionHighlights.map((highlight, index) => (
-            <View key={index} style={styles.highlightItem}>
-              <Chip
-                mode="flat"
-                textStyle={styles.highlightText}
-                style={styles.highlightChip}
-                icon="check-circle"
-              >
-                {highlight}
-              </Chip>
+            // 使用原生 View 替代 Chip，保证文本绝对居中，没有任何偏移
+            <View key={index} style={[styles.highlightCustomChip, { backgroundColor: theme.colors.primaryContainer }]}>
+              <Text style={{ fontSize: 12, color: theme.colors.primary, fontWeight: '600' }}>✓ {highlight}</Text>
             </View>
           ))}
         </View>
@@ -170,25 +76,16 @@ export const SceneSuggestionCard: React.FC<SceneSuggestionCardProps> = ({
     );
   };
 
-  /**
-   * 渲染系统调整项
-   */
   const renderSystemAdjustments = () => {
-    if (scenePackage.systemAdjustments.length === 0) {
-      return null;
-    }
-
+    if (scenePackage.systemAdjustments.length === 0) return null;
     return (
       <View style={styles.section}>
-        <Text variant="titleSmall" style={styles.sectionTitle}>
-          系统调整
-        </Text>
+        <Text variant="titleSmall" style={[styles.sectionTitle, { color: theme.colors.onSurfaceVariant }]}>系统调整</Text>
         {scenePackage.systemAdjustments.map((adjustment) => (
-          <List.Item
-            key={adjustment.id}
-            title={adjustment.label}
-            description={adjustment.description}
-            left={(props) => <List.Icon {...props} icon="cog" />}
+          <List.Item key={adjustment.id} title={adjustment.label} description={adjustment.description}
+            titleStyle={{ color: theme.colors.onSurface, fontWeight: '600' }}
+            descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
+            left={(props) => <List.Icon {...props} icon="cog" color={theme.colors.primary} />}
             style={styles.listItem}
           />
         ))}
@@ -196,25 +93,16 @@ export const SceneSuggestionCard: React.FC<SceneSuggestionCardProps> = ({
     );
   };
 
-  /**
-   * 渲染应用启动项
-   */
   const renderAppLaunches = () => {
-    if (scenePackage.appLaunches.length === 0) {
-      return null;
-    }
-
+    if (scenePackage.appLaunches.length === 0) return null;
     return (
       <View style={styles.section}>
-        <Text variant="titleSmall" style={styles.sectionTitle}>
-          应用启动
-        </Text>
+        <Text variant="titleSmall" style={[styles.sectionTitle, { color: theme.colors.onSurfaceVariant }]}>应用启动</Text>
         {scenePackage.appLaunches.map((appLaunch) => (
-          <List.Item
-            key={appLaunch.id}
-            title={appLaunch.label}
-            description={appLaunch.description}
-            left={(props) => <List.Icon {...props} icon="application" />}
+          <List.Item key={appLaunch.id} title={appLaunch.label} description={appLaunch.description}
+            titleStyle={{ color: theme.colors.onSurface, fontWeight: '600' }}
+            descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
+            left={(props) => <List.Icon {...props} icon="application" color={theme.colors.primary} />}
             style={styles.listItem}
           />
         ))}
@@ -222,126 +110,64 @@ export const SceneSuggestionCard: React.FC<SceneSuggestionCardProps> = ({
     );
   };
 
-  /**
-   * 渲染降级说明
-   */
   const renderFallbackNotes = () => {
-    if (hideFallbackNotes || !showFallback || scenePackage.fallbackNotes.length === 0) {
-      return null;
-    }
-
+    if (hideFallbackNotes || !showFallback || scenePackage.fallbackNotes.length === 0) return null;
     return (
-      <Surface style={styles.fallbackSurface} elevation={0}>
-        <Text variant="titleSmall" style={styles.fallbackTitle}>
-          ⚠️ 部分功能不可用
-        </Text>
+      <Surface style={[styles.fallbackSurface, { backgroundColor: theme.colors.errorContainer }]} elevation={0}>
+        <Text variant="titleSmall" style={[styles.fallbackTitle, { color: theme.colors.error }]}>⚠️ 部分功能降级</Text>
         {scenePackage.fallbackNotes.map((note, index) => (
           <View key={index} style={styles.fallbackNoteItem}>
-            <Text variant="bodySmall" style={styles.fallbackNoteText}>
-              • {note.message}
-            </Text>
+            <Text variant="bodySmall" style={{ color: theme.colors.error }}>• {note.message}</Text>
           </View>
         ))}
       </Surface>
     );
   };
 
-  /**
-   * 渲染置信度进度条
-   */
-  const renderConfidenceBar = () => {
-    if (confidence === undefined) {
-      return null;
-    }
-
-    return (
-      <View style={styles.confidenceContainer}>
-        <View style={styles.confidenceHeader}>
-          <Text variant="bodySmall" style={styles.confidenceLabel}>
-            置信度
-          </Text>
-          <Text variant="bodySmall" style={styles.confidenceValue}>
-            {(confidence * 100).toFixed(0)}%
-          </Text>
-        </View>
-        <ProgressBar
-          progress={confidence}
-          color={scenePackage.color}
-          style={styles.confidenceBar}
-        />
-      </View>
-    );
-  };
-
   return (
-    <Card mode="elevated" style={[styles.card, style]}>
-      <Card.Content>
-        {/* 卡片头部 */}
+    <Card mode="elevated" elevation={1} style={[styles.card, { borderRadius: borderRadius.xl, backgroundColor: theme.colors.surface }, style]}>
+      <Card.Content style={{ padding: spacing.md }}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <Surface style={[styles.iconContainer, { backgroundColor: `${scenePackage.color}20` }]} elevation={0}>
-              <Text style={styles.icon}>
-                {sceneIcons[scenePackage.sceneId] || sceneIcons.UNKNOWN}
-              </Text>
+            <Surface style={[styles.iconContainer, { backgroundColor: theme.colors.primaryContainer }]} elevation={0}>
+              <Text style={styles.icon}>{sceneIcons[scenePackage.sceneId] || sceneIcons.UNKNOWN}</Text>
             </Surface>
             <View style={styles.headerInfo}>
-              <Text variant="titleLarge" style={styles.title}>
-                {scenePackage.displayName}模式
-              </Text>
-              {confidence !== undefined && (
-                <Text variant="bodySmall" style={styles.subtitle}>
-                  已为您准备相关操作
-                </Text>
-              )}
+              <Text variant="titleLarge" style={[styles.title, { color: theme.colors.primary }]}>{scenePackage.displayName}模式</Text>
+              {confidence !== undefined && <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>场景建议已就绪</Text>}
             </View>
           </View>
-          <IconButton
-            icon={expanded ? 'chevron-up' : 'chevron-down'}
-            size={20}
-            onPress={() => setExpanded(!expanded)}
-            style={styles.expandButton}
-          />
+          <IconButton icon={expanded ? 'chevron-up' : 'chevron-down'} size={24} iconColor={theme.colors.primary} onPress={() => setExpanded(!expanded)} style={styles.expandButton} />
         </View>
 
-        {/* 置信度进度条 */}
-        {renderConfidenceBar()}
+        {confidence !== undefined && (
+          <View style={styles.confidenceContainer}>
+            <View style={styles.confidenceHeader}>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>匹配度</Text>
+              <Text variant="bodySmall" style={{ fontWeight: '700', color: theme.colors.primary }}>{(confidence * 100).toFixed(0)}%</Text>
+            </View>
+            <ProgressBar progress={confidence} color={theme.colors.primary} style={[styles.confidenceBar, { backgroundColor: theme.colors.surfaceVariant }]} />
+          </View>
+        )}
 
-        {/* 展开内容 */}
         {expanded && (
           <View style={styles.expandedContent}>
-            {/* 检测要点 */}
             {renderHighlights()}
-
-            {/* 系统调整项 */}
             {renderSystemAdjustments()}
-
-            {/* 应用启动项 */}
             {renderAppLaunches()}
-
-            {/* 降级说明 */}
             {renderFallbackNotes()}
           </View>
         )}
 
-        <Divider style={styles.divider} />
-
-        {/* 一键操作按钮 */}
         <View style={styles.actionsContainer}>
           {scenePackage.oneTapActions.map((action) => {
             const isExecuting = executing && executedActionId === action.id;
-            const isPrimaryAction = action.id === scenePackage.oneTapActions[0]?.id;
-
+            const isPrimary = action.type === 'primary';
             return (
-              <Button
-                key={action.id}
-                mode={getButtonMode(action)}
-                onPress={() => handleAction(action)}
-                loading={isExecuting}
-                disabled={executing && !isExecuting}
-                style={[
-                  styles.actionButton,
-                  isPrimaryAction ? styles.primaryButton : styles.secondaryButton,
-                ]}
+              <Button key={action.id} mode={getButtonMode(action)} onPress={() => handleAction(action)} loading={isExecuting} disabled={executing && !isExecuting}
+                buttonColor={isPrimary ? theme.colors.primary : theme.colors.primaryContainer}
+                textColor={isPrimary ? theme.colors.onPrimary : theme.colors.primary}
+                style={[styles.actionButton, isPrimary ? styles.primaryButton : styles.secondaryButton]}
                 contentStyle={styles.buttonContent}
                 labelStyle={styles.buttonLabel}
                 icon={actionIcons[action.action] || 'check-circle'}
@@ -357,137 +183,32 @@ export const SceneSuggestionCard: React.FC<SceneSuggestionCardProps> = ({
 };
 
 const styles = StyleSheet.create({
-  card: {
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.md,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.md,
-  },
-  icon: {
-    fontSize: 24,
-  },
-  headerInfo: {
-    flex: 1,
-  },
-  title: {
-    fontWeight: '700',
-  },
-  subtitle: {
-    color: '#666',
-    marginTop: 2,
-  },
-  expandButton: {
-    margin: 0,
-  },
-  confidenceContainer: {
-    marginBottom: spacing.md,
-  },
-  confidenceHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: spacing.xs,
-  },
-  confidenceLabel: {
-    color: '#666',
-  },
-  confidenceValue: {
-    fontWeight: '600',
-  },
-  confidenceBar: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#E0E0E0',
-  },
-  expandedContent: {
-    marginTop: spacing.sm,
-  },
-  section: {
-    marginBottom: spacing.md,
-  },
-  sectionTitle: {
-    fontWeight: '600',
-    marginBottom: spacing.sm,
-    color: '#424242',
-  },
-  highlightsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-  },
-  highlightItem: {
-    marginRight: spacing.xs,
-    marginBottom: spacing.xs,
-  },
-  highlightChip: {
-    backgroundColor: '#E8F4FD',
-    height: 28,
-  },
-  highlightText: {
-    fontSize: 12,
-    color: '#1976D2',
-  },
-  listItem: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: 0,
-  },
-  fallbackSurface: {
-    backgroundColor: '#FFF4E5',
-    padding: spacing.md,
-    borderRadius: 8,
-    marginTop: spacing.sm,
-  },
-  fallbackTitle: {
-    fontWeight: '600',
-    color: '#E65100',
-    marginBottom: spacing.xs,
-  },
-  fallbackNoteItem: {
-    marginTop: spacing.xs,
-  },
-  fallbackNoteText: {
-    color: '#BF360C',
-  },
-  divider: {
-    marginTop: spacing.md,
-    marginBottom: spacing.md,
-  },
-  actionsContainer: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  actionButton: {
-    flex: 1,
-  },
-  primaryButton: {
-    flex: 2,
-  },
-  secondaryButton: {
-    flex: 1,
-  },
-  buttonContent: {
-    paddingVertical: 4,
-  },
-  buttonLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  card: {  marginBottom: spacing.md },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  iconContainer: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md },
+  icon: { fontSize: 28 },
+  headerInfo: { flex: 1 },
+  title: { fontWeight: '800', letterSpacing: -0.5 },
+  expandButton: { margin: 0 },
+  confidenceContainer: { marginBottom: spacing.lg },
+  confidenceHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  confidenceBar: { height: 8, borderRadius: 4 },
+  expandedContent: { marginTop: spacing.xs, marginBottom: spacing.sm },
+  section: { marginBottom: spacing.md },
+  sectionTitle: { fontWeight: '700', marginBottom: spacing.sm },
+  highlightsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  highlightCustomChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, justifyContent: 'center', alignItems: 'center' },
+  listItem: { paddingVertical: 4, paddingHorizontal: 0 },
+  fallbackSurface: { padding: spacing.md, borderRadius: 16, marginTop: spacing.sm },
+  fallbackTitle: { fontWeight: '700', marginBottom: spacing.xs },
+  fallbackNoteItem: { marginTop: 4 },
+  actionsContainer: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
+  actionButton: { borderRadius: 999 },
+  primaryButton: { flex: 2 },
+  secondaryButton: { flex: 1 },
+  buttonContent: { height: 54 },
+  buttonLabel: { fontSize: 15, fontWeight: '700' },
 });
 
 export default SceneSuggestionCard;
