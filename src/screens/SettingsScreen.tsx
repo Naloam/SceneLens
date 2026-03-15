@@ -4,7 +4,11 @@
  * 提供应用设置选项，包括外观、通知、高级设置和数据管理
  */
 
-import React, { useEffect, useState } from 'react';
+
+import React, { 
+  useEffect, 
+  useState 
+} from 'react';
 import {
   View,
   StyleSheet,
@@ -29,17 +33,32 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
-import { useSettingsStore, themeColors, type ThemeColor, type NotificationStyle, type DetectionInterval } from '../stores/settingsStore';
-import { storageManager } from '../stores/storageManager';
+import { 
+  useSettingsStore, 
+  themeColors, 
+  type ThemeColor, 
+  type NotificationStyle, 
+  type DetectionInterval 
+} from '../stores/settingsStore';
 
 /**
- * 颜色选择器组件
+ * 颜色选择器
  */
 const ColorPicker: React.FC<{
   selectedColor: ThemeColor;
   onSelectColor: (color: ThemeColor) => void;
 }> = ({ selectedColor, onSelectColor }) => {
-  const colors: ThemeColor[] = ['blue', 'purple', 'green', 'orange'];
+  const theme = useTheme();
+  const colors: ThemeColor[] = [
+    'blue', 
+    'purple', 
+    'green', 
+    'orange', 
+    'pink', 
+    'mint', 
+    'sky', 
+    'lavender'
+  ];
 
   return (
     <View style={styles.colorPickerContainer}>
@@ -49,12 +68,17 @@ const ColorPicker: React.FC<{
           style={[
             styles.colorDot,
             { backgroundColor: themeColors[color].primary },
-            selectedColor === color && styles.colorDotSelected,
+            selectedColor === color && { 
+              borderColor: theme.colors.primary, 
+              borderWidth: 3 
+            },
           ]}
           onPress={() => onSelectColor(color)}
           activeOpacity={0.7}
         >
-          {selectedColor === color && <View style={styles.colorDotCheck} />}
+          {selectedColor === color && (
+            <View style={styles.colorDotCheck} />
+          )}
         </TouchableOpacity>
       ))}
     </View>
@@ -62,7 +86,7 @@ const ColorPicker: React.FC<{
 };
 
 /**
- * 单选按钮组组件
+ * 单选组件
  */
 interface RadioOption<T> {
   label: string;
@@ -84,11 +108,21 @@ const RadioGroup: React.FC<{
           <TouchableRipple onPress={() => onChange(option.value)}>
             <View style={styles.radioItem}>
               <View style={styles.radioContent}>
-                <Text style={[styles.radioLabel, { color: theme.colors.onSurface }]}>
+                <Text 
+                  style={[
+                    styles.radioLabel, 
+                    { color: theme.colors.onSurface }
+                  ]}
+                >
                   {option.label}
                 </Text>
                 {option.description && (
-                  <Text style={[styles.radioDescription, { color: theme.colors.onSurfaceVariant }]}>
+                  <Text 
+                    style={[
+                      styles.radioDescription, 
+                      { color: theme.colors.onSurfaceVariant }
+                    ]}
+                  >
                     {option.description}
                   </Text>
                 )}
@@ -97,10 +131,18 @@ const RadioGroup: React.FC<{
                 value={option.value.toString()}
                 status={value === option.value ? 'checked' : 'unchecked'}
                 onPress={() => onChange(option.value)}
+                color={theme.colors.primary}
               />
             </View>
           </TouchableRipple>
-          {index < options.length - 1 && <Divider />}
+          {index < options.length - 1 && (
+            <Divider 
+              style={{ 
+                backgroundColor: theme.colors.surfaceVariant, 
+                opacity: 0.3 
+              }} 
+            />
+          )}
         </View>
       ))}
     </View>
@@ -108,7 +150,7 @@ const RadioGroup: React.FC<{
 };
 
 /**
- * 置信度滑块组件
+ * 阈值滑块
  */
 const ConfidenceSlider: React.FC<{
   value: number;
@@ -121,14 +163,29 @@ const ConfidenceSlider: React.FC<{
     <View style={styles.sliderSection}>
       <View style={styles.sliderHeader}>
         <View>
-          <Text style={[styles.sliderTitle, { color: theme.colors.onSurface }]}>
+          <Text 
+            style={[
+              styles.sliderTitle, 
+              { color: theme.colors.onSurface }
+            ]}
+          >
             置信度阈值
           </Text>
-          <Text style={[styles.sliderDescription, { color: theme.colors.onSurfaceVariant }]}>
+          <Text 
+            style={[
+              styles.sliderDescription, 
+              { color: theme.colors.onSurfaceVariant }
+            ]}
+          >
             触发场景通知的最低置信度
           </Text>
         </View>
-        <Text style={[styles.sliderValue, { color: theme.colors.primary }]}>
+        <Text 
+          style={[
+            styles.sliderValue, 
+            { color: theme.colors.primary }
+          ]}
+        >
           {value}%
         </Text>
       </View>
@@ -138,14 +195,22 @@ const ConfidenceSlider: React.FC<{
             key={option}
             style={[
               styles.sliderButton,
-              value === option && { backgroundColor: theme.colors.primary },
+              { 
+                backgroundColor: value === option 
+                  ? theme.colors.primary 
+                  : theme.colors.surface 
+              },
             ]}
             onPress={() => onChange(option)}
           >
             <Text
               style={[
                 styles.sliderButtonText,
-                value === option && { color: '#FFFFFF' },
+                { 
+                  color: value === option 
+                    ? theme.colors.onPrimary 
+                    : theme.colors.onSurfaceVariant 
+                },
               ]}
             >
               {option}%
@@ -159,12 +224,11 @@ const ConfidenceSlider: React.FC<{
 
 type SettingsNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
 
-/**
- * 主设置页面
- */
 export const SettingsScreen: React.FC = () => {
   const theme = useTheme();
   const navigation = useNavigation<SettingsNavigationProp>();
+  const ultraLightBg = theme.colors.primary + '0A';
+
   const {
     settings,
     isLoading,
@@ -190,34 +254,22 @@ export const SettingsScreen: React.FC = () => {
     loadSettings();
   }, []);
 
-  /**
-   * 导出数据
-   */
   const handleExportData = async () => {
     setIsExporting(true);
     try {
-      const data = await exportData();
-
-      // 在实际应用中，可以使用 expo-file-system 和 expo-sharing
-      // 这里简化处理
+      await exportData();
       Alert.alert(
         '导出数据',
-        '数据已准备就绪（JSON 格式）\n\n在实际应用中，这里会保存为文件并提供分享选项。',
-        [{ text: '确定', onPress: () => {} }]
+        '数据已准备就绪',
+        [{ text: '确定' }]
       );
-
-      // TODO: 安装 expo-sharing 后可以启用完整的导出功能
-      // npm install expo-sharing
     } catch (error) {
-      Alert.alert('导出失败', `无法导出数据：${(error as Error).message}`);
+      Alert.alert('导出失败', '无法导出数据');
     } finally {
       setIsExporting(false);
     }
   };
 
-  /**
-   * 清除历史记录
-   */
   const handleClearHistory = async () => {
     setIsClearing(true);
     try {
@@ -225,175 +277,175 @@ export const SettingsScreen: React.FC = () => {
       setShowClearDialog(false);
       Alert.alert('成功', '历史记录已清除');
     } catch (error) {
-      Alert.alert('清除失败', `无法清除历史记录：${(error as Error).message}`);
+      Alert.alert('清除失败', '操作未完成');
     } finally {
       setIsClearing(false);
     }
   };
 
-  /**
-   * 重置所有设置
-   */
   const handleResetSettings = () => {
     resetSettings();
     setShowResetDialog(false);
-    Alert.alert('成功', '设置已重置为默认值');
+    Alert.alert('成功', '设置已重置');
   };
 
-  /**
-   * 打开隐私政策
-   */
   const openPrivacyPolicy = () => {
-    // TODO: 替换为实际的隐私政策 URL
-    Alert.alert('隐私政策', '隐私政策将在未来版本中提供');
+    Alert.alert('隐私政策', '相关条款将在后续版本更新。');
   };
 
-  /**
-   * 开源源代码仓库
-   */
   const openGitHubRepo = () => {
-    Linking.openURL('https://github.com/yourusername/scenelens').catch((err) => {
-      Alert.alert('错误', '无法打开链接');
+    Linking.openURL('https://github.com/').catch(() => {
+      Alert.alert('错误', '无法连接。');
     });
   };
 
-  /**
-   * 发送反馈
-   */
   const sendFeedback = () => {
     const email = 'feedback@scenelens.app';
     const subject = 'SceneLens 反馈';
-    const body = '请在此处描述您的意见或建议...';
-
     Linking.openURL(
-      `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+      `mailto:${email}?subject=${encodeURIComponent(subject)}`
     ).catch(() => {
-      Alert.alert('错误', '无法打开邮件应用');
+      Alert.alert('错误', '未找到邮件客户端。');
     });
   };
 
   const notificationStyleOptions: RadioOption<NotificationStyle>[] = [
-    {
-      label: '基本样式',
-      value: 'basic',
-      description: '仅显示场景名称和基本操作',
+    { 
+      label: '基本样式', 
+      value: 'basic', 
+      description: '仅显示场景名称和基本操作' 
     },
-    {
-      label: '详细样式',
-      value: 'detailed',
-      description: '显示场景详情、置信度和完整操作',
+    { 
+      label: '详细样式', 
+      value: 'detailed', 
+      description: '显示场景详情、置信度和完整操作' 
     },
   ];
 
   const intervalOptions: RadioOption<DetectionInterval>[] = [
-    { label: '5 分钟', value: 5, description: '更频繁的检测，可能增加耗电' },
-    { label: '10 分钟', value: 10, description: '平衡的检测频率' },
-    { label: '15 分钟', value: 15, description: '较少的检测，更省电' },
+    { label: '5 分钟', value: 5, description: '更频繁的检测' },
+    { label: '10 分钟', value: 10, description: '平衡模式' },
+    { label: '15 分钟', value: 15, description: '省电模式' },
   ];
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      style={[
+        styles.container, 
+        { backgroundColor: theme.colors.background }
+      ]}
       contentContainerStyle={styles.contentContainer}
     >
-      {/* 场景与自动化 */}
-      <Card style={styles.card}>
-        <List.Subheader style={styles.cardHeader}>场景与自动化</List.Subheader>
-
-        <List.Item
-          title="场景配置"
-          description="配置各场景的首选应用和触发条件"
-          left={(props) => <List.Icon {...props} icon="cog-outline" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
-          onPress={() => navigation.navigate('SceneConfig')}
+      <Card 
+        mode="contained" 
+        style={[styles.card, { backgroundColor: ultraLightBg }]}
+      >
+        <List.Subheader style={[styles.cardHeader, { color: theme.colors.primary }]}>
+          场景与自动化
+        </List.Subheader>
+        <List.Item 
+          title="场景配置" 
+          description="配置首选应用和触发条件" 
+          left={(props) => <List.Icon {...props} icon="cog-outline" />} 
+          right={(props) => <List.Icon {...props} icon="chevron-right" />} 
+          onPress={() => navigation.navigate('SceneConfig')} 
         />
-
-        <Divider />
-
-        <List.Item
-          title="自动化规则"
-          description="创建和管理场景触发的自动化规则"
-          left={(props) => <List.Icon {...props} icon="robot" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
-          onPress={() => navigation.navigate('RuleEditor')}
+        <Divider style={styles.cardDivider} />
+        <List.Item 
+          title="自动化规则" 
+          description="创建和管理自动化规则" 
+          left={(props) => <List.Icon {...props} icon="robot-outline" />} 
+          right={(props) => <List.Icon {...props} icon="chevron-right" />} 
+          onPress={() => navigation.navigate('RuleEditor')} 
         />
-
-        <Divider />
-
-        <List.Item
-          title="位置配置"
-          description="设置家、公司等常用位置的地理围栏"
-          left={(props) => <List.Icon {...props} icon="map-marker" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
-          onPress={() => navigation.navigate('LocationConfig')}
+        <Divider style={styles.cardDivider} />
+        <List.Item 
+          title="位置配置" 
+          description="设置常用位置的地理围栏" 
+          left={(props) => <List.Icon {...props} icon="map-marker-outline" />} 
+          right={(props) => <List.Icon {...props} icon="chevron-right" />} 
+          onPress={() => navigation.navigate('LocationConfig')} 
         />
-
-        <Divider />
-
-        <List.Item
-          title="会议场景配置"
-          description="配置日历集成和会议检测规则"
-          left={(props) => <List.Icon {...props} icon="calendar-clock" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
-          onPress={() => navigation.navigate('MeetingConfig')}
-        />
-
-        <Divider />
-
-        <List.Item
-          title="权限管理"
-          description="管理应用所需的各项系统权限"
-          left={(props) => <List.Icon {...props} icon="shield-check" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
-          onPress={() => navigation.navigate('Permissions')}
+        <Divider style={styles.cardDivider} />
+        <List.Item 
+          title="权限管理" 
+          description="管理各项系统权限" 
+          left={(props) => <List.Icon {...props} icon="shield-check-outline" />} 
+          right={(props) => <List.Icon {...props} icon="chevron-right" />} 
+          onPress={() => navigation.navigate('Permissions')} 
         />
       </Card>
 
-      {/* 外观设置 */}
-      <Card style={styles.card}>
-        <List.Subheader style={styles.cardHeader}>外观设置</List.Subheader>
-
+      <Card 
+        mode="contained" 
+        style={[styles.card, { backgroundColor: ultraLightBg }]}
+      >
+        <List.Subheader style={[styles.cardHeader, { color: theme.colors.primary }]}>
+          外观设置
+        </List.Subheader>
         <List.Item
           title="深色模式"
           description={settings.darkMode ? '已开启' : '已关闭'}
           left={(props) => <List.Icon {...props} icon="theme-light-dark" />}
-          right={() => <Switch value={settings.darkMode} onValueChange={toggleDarkMode} />}
+          right={() => (
+            <Switch 
+              value={settings.darkMode} 
+              onValueChange={toggleDarkMode} 
+              color={theme.colors.primary}
+            />
+          )}
         />
-
-        <Divider />
-
+        <Divider style={styles.cardDivider} />
         <View style={styles.colorPickerSection}>
           <View style={styles.colorPickerHeader}>
-            <List.Icon icon="palette" />
-            <Text style={[styles.colorPickerTitle, { color: theme.colors.onSurface }]}>
+            <List.Icon 
+              icon="palette-outline" 
+              color={theme.colors.onSurfaceVariant} 
+            />
+            <Text 
+              style={[
+                styles.colorPickerTitle, 
+                { color: theme.colors.onSurface }
+              ]}
+            >
               主题颜色
             </Text>
           </View>
-          <ColorPicker selectedColor={settings.themeColor} onSelectColor={setThemeColor} />
+          <ColorPicker 
+            selectedColor={settings.themeColor} 
+            onSelectColor={setThemeColor} 
+          />
         </View>
       </Card>
 
-      {/* 通知设置 */}
-      <Card style={styles.card}>
-        <List.Subheader style={styles.cardHeader}>通知设置</List.Subheader>
-
+      <Card 
+        mode="contained" 
+        style={[styles.card, { backgroundColor: ultraLightBg }]}
+      >
+        <List.Subheader style={[styles.cardHeader, { color: theme.colors.primary }]}>
+          通知设置
+        </List.Subheader>
         <List.Item
           title="场景通知"
-          description="检测到新场景时发送通知"
-          left={(props) => <List.Icon {...props} icon="bell" />}
+          left={(props) => <List.Icon {...props} icon="bell-outline" />}
           right={() => (
             <Switch
               value={settings.sceneNotificationsEnabled}
               onValueChange={toggleSceneNotifications}
+              color={theme.colors.primary}
             />
           )}
         />
-
         {settings.sceneNotificationsEnabled && (
           <>
-            <Divider />
+            <Divider style={styles.cardDivider} />
             <View style={styles.sectionContent}>
-              <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
+              <Text 
+                style={[
+                  styles.sectionLabel, 
+                  { color: theme.colors.onSurfaceVariant }
+                ]}
+              >
                 通知样式
               </Text>
               <RadioGroup
@@ -404,39 +456,36 @@ export const SettingsScreen: React.FC = () => {
             </View>
           </>
         )}
-        
-        <Divider />
-        
-        <List.Item
-          title="智能通知过滤"
-          description="根据场景自动过滤不重要的通知"
-          left={(props) => <List.Icon {...props} icon="filter" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
-          onPress={() => navigation.navigate('NotificationFilter')}
-        />
       </Card>
 
-      {/* 高级设置 */}
-      <Card style={styles.card}>
-        <List.Subheader style={styles.cardHeader}>高级设置</List.Subheader>
-
+      <Card 
+        mode="contained" 
+        style={[styles.card, { backgroundColor: ultraLightBg }]}
+      >
+        <List.Subheader style={[styles.cardHeader, { color: theme.colors.primary }]}>
+          高级设置
+        </List.Subheader>
         <List.Item
           title="自动检测"
-          description="定期自动检测场景变化"
           left={(props) => <List.Icon {...props} icon="radar" />}
           right={() => (
             <Switch
               value={settings.autoDetectionEnabled}
               onValueChange={toggleAutoDetection}
+              color={theme.colors.primary}
             />
           )}
         />
-
         {settings.autoDetectionEnabled && (
           <>
-            <Divider />
+            <Divider style={styles.cardDivider} />
             <View style={styles.sectionContent}>
-              <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
+              <Text 
+                style={[
+                  styles.sectionLabel, 
+                  { color: theme.colors.onSurfaceVariant }
+                ]}
+              >
                 检测间隔
               </Text>
               <RadioGroup
@@ -447,116 +496,109 @@ export const SettingsScreen: React.FC = () => {
             </View>
           </>
         )}
-
-        <Divider />
-
+        <Divider style={styles.cardDivider} />
         <ConfidenceSlider
           value={settings.confidenceThreshold}
           onChange={setConfidenceThreshold}
         />
       </Card>
 
-      {/* 数据设置 */}
-      <Card style={styles.card}>
-        <List.Subheader style={styles.cardHeader}>数据设置</List.Subheader>
-
-        <List.Item
-          title="导出数据"
-          description="将所有数据导出为 JSON 文件"
-          left={(props) => <List.Icon {...props} icon="download" />}
-          onPress={handleExportData}
-          disabled={isExporting}
+      <Card 
+        mode="contained" 
+        style={[styles.card, { backgroundColor: ultraLightBg }]}
+      >
+        <List.Subheader style={[styles.cardHeader, { color: theme.colors.primary }]}>
+          关于
+        </List.Subheader>
+        <List.Item 
+          title="版本" 
+          description="1.0.0" 
+          left={(props) => <List.Icon {...props} icon="information-outline" />} 
         />
+        <Divider style={styles.cardDivider} />
+        <List.Item 
+          title="隐私政策" 
+          left={(props) => <List.Icon {...props} icon="shield-account-outline" />} 
+          right={(props) => <List.Icon {...props} icon="chevron-right" />} 
+          onPress={openPrivacyPolicy} 
+        />
+        <Divider style={styles.cardDivider} />
+        <List.Item 
+          title="源代码" 
+          left={(props) => <List.Icon {...props} icon="github" />} 
+          right={(props) => <List.Icon {...props} icon="chevron-right" />} 
+          onPress={openGitHubRepo} 
+        />
+        <Divider style={styles.cardDivider} />
+        <List.Item 
+          title="发送反馈" 
+          left={(props) => <List.Icon {...props} icon="message-alert-outline" />} 
+          right={(props) => <List.Icon {...props} icon="chevron-right" />} 
+          onPress={sendFeedback} 
+        />
+      </Card>
 
-        <Divider />
-
+      <Card 
+        mode="contained" 
+        style={[styles.card, { backgroundColor: ultraLightBg, marginBottom: 40 }]}
+      >
+        <List.Subheader style={[styles.cardHeader, { color: theme.colors.error }]}>
+          危险区域
+        </List.Subheader>
         <List.Item
           title="清除历史"
-          description="删除所有场景历史记录"
-          left={(props) => <List.Icon {...props} icon="delete-sweep" />}
+          titleStyle={{ color: theme.colors.error }}
+          left={(props) => <List.Icon {...props} icon="delete-sweep-outline" color={theme.colors.error} />}
           onPress={() => setShowClearDialog(true)}
-          disabled={isClearing}
         />
-
-        <Divider />
-
+        <Divider style={styles.cardDivider} />
         <List.Item
           title="重置设置"
-          description="恢复所有设置为默认值"
-          left={(props) => <List.Icon {...props} icon="restore" />}
+          titleStyle={{ color: theme.colors.error }}
+          left={(props) => <List.Icon {...props} icon="restore" color={theme.colors.error} />}
           onPress={() => setShowResetDialog(true)}
-          style={styles.dangerItem}
         />
       </Card>
 
-      {/* 关于 */}
-      <Card style={styles.card}>
-        <List.Subheader style={styles.cardHeader}>关于</List.Subheader>
-
-        <List.Item
-          title="版本"
-          description="1.0.0"
-          left={(props) => <List.Icon {...props} icon="information" />}
-        />
-
-        <Divider />
-
-        <List.Item
-          title="隐私政策"
-          left={(props) => <List.Icon {...props} icon="shield-account" />}
-          onPress={openPrivacyPolicy}
-        />
-
-        <Divider />
-
-        <List.Item
-          title="源代码"
-          description="在 GitHub 上查看"
-          left={(props) => <List.Icon {...props} icon="github" />}
-          onPress={openGitHubRepo}
-        />
-
-        <Divider />
-
-        <List.Item
-          title="发送反馈"
-          description="报告问题或提出建议"
-          left={(props) => <List.Icon {...props} icon="message-draw" />}
-          onPress={sendFeedback}
-        />
-      </Card>
-
-      {/* 确认重置对话框 */}
       <Portal>
-        <Dialog visible={showResetDialog} onDismiss={() => setShowResetDialog(false)}>
+        <Dialog 
+          visible={showResetDialog} 
+          onDismiss={() => setShowResetDialog(false)}
+          style={{ backgroundColor: theme.colors.surface, borderRadius: 24 }}
+        >
           <Dialog.Title>重置设置</Dialog.Title>
           <Dialog.Content>
-            <Text style={{ color: theme.colors.onSurface }}>
-              确定要将所有设置恢复为默认值吗？此操作无法撤销。
-            </Text>
+            <Text>确定要重置吗？此操作无法撤销。</Text>
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setShowResetDialog(false)}>取消</Button>
-            <Button onPress={handleResetSettings} mode="contained">
-              确认重置
+            <Button 
+              onPress={handleResetSettings} 
+              mode="contained" 
+              buttonColor={theme.colors.error}
+            >
+              确认
             </Button>
           </Dialog.Actions>
         </Dialog>
-      </Portal>
 
-      {/* 确认清除历史对话框 */}
-      <Portal>
-        <Dialog visible={showClearDialog} onDismiss={() => setShowClearDialog(false)}>
+        <Dialog 
+          visible={showClearDialog} 
+          onDismiss={() => setShowClearDialog(false)}
+          style={{ backgroundColor: theme.colors.surface, borderRadius: 24 }}
+        >
           <Dialog.Title>清除历史</Dialog.Title>
           <Dialog.Content>
-            <Text style={{ color: theme.colors.onSurface }}>
-              确定要删除所有场景历史记录吗？此操作无法撤销。
-            </Text>
+            <Text>确定要删除所有历史记录吗？</Text>
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setShowClearDialog(false)}>取消</Button>
-            <Button onPress={handleClearHistory} mode="contained" buttonColor="#FF3B30">
-              确认清除
+            <Button 
+              onPress={handleClearHistory} 
+              mode="contained" 
+              buttonColor={theme.colors.error}
+            >
+              确认
             </Button>
           </Dialog.Actions>
         </Dialog>
@@ -572,136 +614,135 @@ export const SettingsScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { 
+    flex: 1 
   },
-  contentContainer: {
-    padding: 16,
-    paddingBottom: 32,
+  contentContainer: { 
+    padding: 16 
   },
-  card: {
-    marginBottom: 16,
-    elevation: 2,
+  card: { 
+    marginBottom: 16, 
+    borderRadius: 32 
   },
-  cardHeader: {
-    paddingLeft: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
+  cardHeader: { 
+    paddingLeft: 16, 
+    paddingTop: 16, 
+    paddingBottom: 4, 
+    fontWeight: '700' 
   },
-  colorPickerSection: {
-    padding: 16,
+  cardDivider: { 
+    backgroundColor: 'rgba(0,0,0,0.05)', 
+    marginHorizontal: 16 
   },
-  colorPickerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
+  colorPickerSection: { 
+    padding: 16 
   },
-  colorPickerTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginLeft: 8,
+  colorPickerHeader: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginBottom: 16 
   },
-  colorPickerContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
+  colorPickerTitle: { 
+    fontSize: 16, 
+    fontWeight: '600', 
+    marginLeft: 8 
   },
-  colorDot: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: 'transparent',
+  colorPickerContainer: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    justifyContent: 'flex-start', 
+    gap: 16, 
+    paddingHorizontal: 8 
   },
-  colorDotSelected: {
-    borderColor: '#007AFF',
+  colorDot: { 
+    width: 44, 
+    height: 44, 
+    borderRadius: 22, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    borderWidth: 3, 
+    borderColor: 'transparent' 
   },
-  colorDotCheck: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
+  colorDotCheck: { 
+    width: 18, 
+    height: 18, 
+    borderRadius: 9, 
+    backgroundColor: '#FFFFFF' 
   },
-  sectionContent: {
-    padding: 16,
+  sectionContent: { 
+    padding: 16 
   },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    marginBottom: 12,
+  sectionLabel: { 
+    fontSize: 13, 
+    fontWeight: '700', 
+    textTransform: 'uppercase', 
+    marginBottom: 12 
   },
-  radioGroup: {
-    marginTop: 8,
+  radioGroup: { 
+    marginTop: 4 
   },
-  radioItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
+  radioItem: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 12, 
+    paddingHorizontal: 8 
   },
-  radioContent: {
-    flex: 1,
+  radioContent: { 
+    flex: 1 
   },
-  radioLabel: {
-    fontSize: 16,
-    fontWeight: '500',
+  radioLabel: { 
+    fontSize: 16, 
+    fontWeight: '600' 
   },
-  radioDescription: {
-    fontSize: 14,
-    marginTop: 2,
+  radioDescription: { 
+    fontSize: 13, 
+    marginTop: 4 
   },
-  sliderSection: {
-    padding: 16,
+  sliderSection: { 
+    padding: 16 
   },
-  sliderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
+  sliderHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'flex-start', 
+    marginBottom: 16 
   },
-  sliderTitle: {
-    fontSize: 16,
-    fontWeight: '500',
+  sliderTitle: { 
+    fontSize: 16, 
+    fontWeight: '600' 
   },
-  sliderDescription: {
-    fontSize: 14,
-    marginTop: 2,
+  sliderDescription: { 
+    fontSize: 13, 
+    marginTop: 4 
   },
-  sliderValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  sliderValue: { 
+    fontSize: 24, 
+    fontWeight: '800' 
   },
-  sliderButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  sliderButtons: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: 10 
   },
-  sliderButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#F0F0F0',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
+  sliderButton: { 
+    paddingHorizontal: 16, 
+    paddingVertical: 10, 
+    borderRadius: 999 
   },
-  sliderButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
+  sliderButtonText: { 
+    fontSize: 14, 
+    fontWeight: '700' 
   },
-  dangerItem: {
-    backgroundColor: '#FFF5F5',
+  footer: { 
+    alignItems: 'center', 
+    marginTop: 8, 
+    marginBottom: 24 
   },
-  footer: {
-    alignItems: 'center',
-    paddingVertical: 24,
-    marginTop: 8,
-  },
-  footerText: {
-    fontSize: 14,
-    textAlign: 'center',
+  footerText: { 
+    fontSize: 12, 
+    letterSpacing: 0.5, 
+    opacity: 0.7 
   },
 });
+
+export default SettingsScreen;

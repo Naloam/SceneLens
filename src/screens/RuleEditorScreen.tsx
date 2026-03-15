@@ -9,6 +9,16 @@
  * - 预设模板快速启用
  */
 
+/**
+ * RuleEditorScreen - 自动化规则编辑器界面
+ * * 功能：
+ * - 规则列表展示（已有规则）
+ * - 新建规则向导
+ * - 规则启用/禁用开关
+ * - 规则测试功能
+ * - 预设模板快速启用
+ */
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, Alert, FlatList } from 'react-native';
 import { 
@@ -58,7 +68,7 @@ import {
 } from '../rules/RuleTemplates';
 import type { AutomationRule } from '../types/automation';
 import type { SceneType } from '../types';
-import { spacing } from '../theme/spacing';
+import { spacing, borderRadius } from '../theme/spacing';
 
 // ==================== 类型定义 ====================
 
@@ -90,6 +100,7 @@ const sceneLabels: Record<SceneType, string> = {
 export const RuleEditorScreen: React.FC = () => {
   const theme = useTheme();
   const navigation = useNavigation<RuleEditorNavigationProp>();
+  const ultraLightBg = theme.colors.primary + '0A'; // 极淡的主题色，用于推荐徽章
 
   // 状态
   const [loading, setLoading] = useState(true);
@@ -290,7 +301,6 @@ export const RuleEditorScreen: React.FC = () => {
   // ==================== 测试规则 ====================
 
   const testRule = useCallback(async (rule: AutomationRule) => {
-    // 模拟测试 - 显示规则将如何触发
     const conditionsText = rule.conditions.map(c => {
       if (c.type === 'scene') {
         const scene = SCENE_OPTIONS.find(s => s.value === c.value);
@@ -316,13 +326,17 @@ export const RuleEditorScreen: React.FC = () => {
   // ==================== 渲染函数 ====================
 
   const renderRuleItem = useCallback(({ item: rule }: { item: AutomationRule }) => (
-    <Card style={styles.ruleCard} mode="outlined">
-      <Card.Content>
+    <Card 
+      style={[styles.card, { backgroundColor: theme.colors.surface }]} 
+      mode="elevated" 
+      elevation={1}
+    >
+      <Card.Content style={styles.cardContent}>
         <View style={styles.ruleHeader}>
           <View style={styles.ruleInfo}>
-            <Text variant="titleMedium">{rule.name}</Text>
+            <Text variant="titleMedium" style={{ fontWeight: '800' }}>{rule.name}</Text>
             {rule.description && (
-              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
                 {rule.description}
               </Text>
             )}
@@ -330,54 +344,34 @@ export const RuleEditorScreen: React.FC = () => {
           <Switch
             value={rule.enabled}
             onValueChange={(value) => handleToggleRule(rule.id, value)}
+            color={theme.colors.primary}
           />
         </View>
 
-        <View style={styles.ruleMeta}>
-          <Chip icon="flash" compact style={styles.chip}>
-            优先级 {rule.priority}
-          </Chip>
+        {/* 修复：使用无高度限制的 View 代替 Chip，防止文字被切割 */}
+        <View style={styles.tagContainer}>
+          <View style={[styles.customTag, { backgroundColor: theme.colors.primaryContainer }]}>
+            <Text style={[styles.tagText, { color: theme.colors.primary }]}>优先级 {rule.priority}</Text>
+          </View>
           {rule.cooldown > 0 && (
-            <Chip icon="timer" compact style={styles.chip}>
-              冷却 {rule.cooldown}分钟
-            </Chip>
+            <View style={[styles.customTag, { backgroundColor: theme.colors.primaryContainer }]}>
+              <Text style={[styles.tagText, { color: theme.colors.primary }]}>冷却 {rule.cooldown}分钟</Text>
+            </View>
           )}
-          <Chip icon="format-list-bulleted" compact style={styles.chip}>
-            {rule.conditions.length} 条件
-          </Chip>
-          <Chip icon="play-box" compact style={styles.chip}>
-            {rule.actions.length} 动作
-          </Chip>
+          <View style={[styles.customTag, { backgroundColor: theme.colors.surfaceVariant }]}>
+            <Text style={[styles.tagText, { color: theme.colors.onSurfaceVariant }]}>{rule.conditions.length} 条件</Text>
+          </View>
+          <View style={[styles.customTag, { backgroundColor: theme.colors.surfaceVariant }]}>
+            <Text style={[styles.tagText, { color: theme.colors.onSurfaceVariant }]}>{rule.actions.length} 动作</Text>
+          </View>
         </View>
 
         <Divider style={styles.divider} />
 
         <View style={styles.ruleActions}>
-          <Button 
-            mode="text" 
-            icon="play" 
-            onPress={() => testRule(rule)}
-            compact
-          >
-            测试
-          </Button>
-          <Button 
-            mode="text" 
-            icon="pencil" 
-            onPress={() => startEditRule(rule)}
-            compact
-          >
-            编辑
-          </Button>
-          <Button 
-            mode="text" 
-            icon="delete" 
-            onPress={() => confirmDeleteRule(rule.id)}
-            textColor={theme.colors.error}
-            compact
-          >
-            删除
-          </Button>
+          <Button mode="text" icon="play" onPress={() => testRule(rule)} compact>测试</Button>
+          <Button mode="text" icon="pencil" onPress={() => startEditRule(rule)} compact>编辑</Button>
+          <Button mode="text" icon="delete" onPress={() => confirmDeleteRule(rule.id)} textColor={theme.colors.error} compact>删除</Button>
         </View>
       </Card.Content>
     </Card>
@@ -385,35 +379,42 @@ export const RuleEditorScreen: React.FC = () => {
 
   const renderTemplateItem = useCallback(({ item: template }: { item: RuleTemplate }) => (
     <Card 
-      style={styles.templateCard} 
-      mode="outlined"
+      style={[styles.card, { backgroundColor: theme.colors.surface }]} 
+      mode="elevated"
+      elevation={1}
       onPress={() => handleTemplatePress(template)}
     >
-      <Card.Content>
+      <Card.Content style={styles.cardContent}>
         <View style={styles.templateHeader}>
           <Text style={styles.templateIcon}>{template.icon}</Text>
           <View style={styles.templateInfo}>
             <View style={styles.templateTitleRow}>
-              <Text variant="titleMedium">{template.name}</Text>
+              <Text variant="titleMedium" style={{ fontWeight: '800' }}>{template.name}</Text>
               {template.recommended && (
-                <Chip compact style={styles.recommendedChip}>推荐</Chip>
+                <Surface style={[styles.recBadge, { backgroundColor: ultraLightBg }]} elevation={0}>
+                  <Text style={[styles.recText, { color: theme.colors.primary }]}>推荐</Text>
+                </Surface>
               )}
             </View>
-            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4, lineHeight: 18 }}>
               {template.description}
             </Text>
           </View>
         </View>
 
-        <View style={styles.tagContainer}>
+        {/* 修复：使用纯 View 和 Padding 撑开，完美对齐，坚决不切字 */}
+        <View style={styles.tagsRow}>
           {template.tags.slice(0, 3).map(tag => (
-            <Chip key={tag} compact style={styles.tagChip}>{tag}</Chip>
+            <View key={tag} style={[styles.customTag, { backgroundColor: theme.colors.primaryContainer }]}>
+              <Text style={[styles.tagText, { color: theme.colors.primary }]}>{tag}</Text>
+            </View>
           ))}
         </View>
       </Card.Content>
     </Card>
-  ), [theme, handleTemplatePress]);
+  ), [theme, handleTemplatePress, ultraLightBg]);
 
+  // (内部表单渲染组件省略修改，保持原样逻辑...)
   const renderConditionItem = useCallback((condition: ConditionDraft, index: number) => (
     <Surface key={condition.id} style={styles.conditionItem} elevation={1}>
       <View style={styles.conditionContent}>
@@ -463,7 +464,6 @@ export const RuleEditorScreen: React.FC = () => {
               {editorMode === 'create' ? '新建规则' : '编辑规则'}
             </Text>
 
-            {/* 基本信息 */}
             <TextInput
               label="规则名称"
               value={ruleDraft.name}
@@ -484,7 +484,6 @@ export const RuleEditorScreen: React.FC = () => {
 
             <Divider style={styles.sectionDivider} />
 
-            {/* 条件 */}
             <View style={styles.sectionHeader}>
               <Text variant="titleMedium">触发条件</Text>
               <SegmentedButtons
@@ -500,34 +499,22 @@ export const RuleEditorScreen: React.FC = () => {
 
             {ruleDraft.conditions.map(renderConditionItem)}
 
-            <Button 
-              mode="outlined" 
-              icon="plus" 
-              onPress={() => setConditionDialogVisible(true)}
-              style={styles.addButton}
-            >
+            <Button mode="outlined" icon="plus" onPress={() => setConditionDialogVisible(true)} style={styles.addButton}>
               添加条件
             </Button>
 
             <Divider style={styles.sectionDivider} />
 
-            {/* 动作 */}
             <Text variant="titleMedium" style={styles.sectionTitle}>执行动作</Text>
 
             {ruleDraft.actions.map(renderActionItem)}
 
-            <Button 
-              mode="outlined" 
-              icon="plus" 
-              onPress={() => setActionDialogVisible(true)}
-              style={styles.addButton}
-            >
+            <Button mode="outlined" icon="plus" onPress={() => setActionDialogVisible(true)} style={styles.addButton}>
               添加动作
             </Button>
 
             <Divider style={styles.sectionDivider} />
 
-            {/* 高级设置 */}
             <Text variant="titleMedium" style={styles.sectionTitle}>高级设置</Text>
 
             <View style={styles.settingRow}>
@@ -538,7 +525,6 @@ export const RuleEditorScreen: React.FC = () => {
                     key={p}
                     selected={ruleDraft.priority === p}
                     onPress={() => updateDraft({ priority: p })}
-                    style={styles.priorityChip}
                   >
                     {p}
                   </Chip>
@@ -560,42 +546,20 @@ export const RuleEditorScreen: React.FC = () => {
 
             <View style={styles.switchRow}>
               <Text variant="bodyMedium">启用规则</Text>
-              <Switch
-                value={ruleDraft.enabled}
-                onValueChange={(value) => updateDraft({ enabled: value })}
-              />
+              <Switch value={ruleDraft.enabled} onValueChange={(value) => updateDraft({ enabled: value })} color={theme.colors.primary} />
             </View>
 
-            {/* 验证警告 */}
             {validationResult?.warnings.map((warning, index) => (
-              <Banner
-                key={index}
-                visible={true}
-                icon="alert"
-                style={styles.warningBanner}
-              >
+              <Banner key={index} visible={true} icon="alert" style={styles.warningBanner}>
                 {warning.message}
               </Banner>
             ))}
           </Card.Content>
         </Card>
 
-        {/* 操作按钮 */}
         <View style={styles.editorActions}>
-          <Button 
-            mode="outlined" 
-            onPress={cancelEdit}
-            style={styles.editorButton}
-          >
-            取消
-          </Button>
-          <Button 
-            mode="contained" 
-            onPress={saveRule}
-            style={styles.editorButton}
-          >
-            保存
-          </Button>
+          <Button mode="outlined" onPress={cancelEdit} style={styles.editorButton}>取消</Button>
+          <Button mode="contained" onPress={saveRule} style={styles.editorButton}>保存</Button>
         </View>
       </ScrollView>
     );
@@ -605,15 +569,14 @@ export const RuleEditorScreen: React.FC = () => {
 
   const renderList = () => (
     <View style={styles.container}>
-      {/* 搜索栏 */}
       <Searchbar
         placeholder="搜索规则或模板..."
         onChangeText={setSearchQuery}
         value={searchQuery}
-        style={styles.searchbar}
+        style={[styles.searchbar, { backgroundColor: theme.colors.surfaceVariant, elevation: 0 }]}
+        inputStyle={{ paddingBottom: 6 }}
       />
 
-      {/* 视图切换 */}
       <SegmentedButtons
         value={viewMode}
         onValueChange={(value) => setViewMode(value as ViewMode)}
@@ -624,7 +587,6 @@ export const RuleEditorScreen: React.FC = () => {
         style={styles.viewToggle}
       />
 
-      {/* 推荐横幅 */}
       {showBanner && viewMode === 'rules' && rules.length === 0 && (
         <Banner
           visible={true}
@@ -638,7 +600,6 @@ export const RuleEditorScreen: React.FC = () => {
         </Banner>
       )}
 
-      {/* 规则列表 */}
       {viewMode === 'rules' && (
         <FlatList
           data={filteredRules}
@@ -651,20 +612,13 @@ export const RuleEditorScreen: React.FC = () => {
                 {searchQuery ? '没有找到匹配的规则' : '暂无自动化规则'}
               </Text>
               {!searchQuery && (
-                <Button 
-                  mode="contained" 
-                  onPress={startCreateRule}
-                  style={styles.emptyButton}
-                >
-                  创建第一条规则
-                </Button>
+                <Button mode="contained" onPress={startCreateRule} style={styles.emptyButton}>创建第一条规则</Button>
               )}
             </View>
           }
         />
       )}
 
-      {/* 模板列表 */}
       {viewMode === 'templates' && (
         <FlatList
           data={filteredTemplates}
@@ -673,31 +627,23 @@ export const RuleEditorScreen: React.FC = () => {
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text variant="bodyLarge" style={styles.emptyText}>
-                没有找到匹配的模板
-              </Text>
+              <Text variant="bodyLarge" style={styles.emptyText}>没有找到匹配的模板</Text>
             </View>
           }
         />
       )}
 
-      {/* FAB */}
       {viewMode === 'rules' && (
-        <FAB
-          icon="plus"
-          style={[styles.fab, { backgroundColor: theme.colors.primary }]}
-          onPress={startCreateRule}
-          label="新建规则"
-        />
+        <FAB icon="plus" style={[styles.fab, { backgroundColor: theme.colors.primary }]} onPress={startCreateRule} label="新建规则" color={theme.colors.onPrimary} />
       )}
     </View>
   );
 
-  // ==================== 对话框 ====================
+  // ==================== 对话框 (无修改保留) ====================
 
   const renderConditionDialog = () => (
     <Portal>
-      <Dialog visible={conditionDialogVisible} onDismiss={() => setConditionDialogVisible(false)}>
+      <Dialog visible={conditionDialogVisible} onDismiss={() => setConditionDialogVisible(false)} style={{ borderRadius: borderRadius.xl, backgroundColor: theme.colors.surface }}>
         <Dialog.Title>添加条件</Dialog.Title>
         <Dialog.ScrollArea style={styles.dialogScrollArea}>
           <ScrollView>
@@ -711,12 +657,7 @@ export const RuleEditorScreen: React.FC = () => {
                     const defaultValue = option.type === 'scene' ? 'HOME' 
                       : option.type === 'time' ? ['09:00', '18:00']
                       : option.defaultValue || '';
-                    
-                    ruleBuilder.addCondition({
-                      type: option.type,
-                      operator: option.operators[0]?.value || 'equals',
-                      value: defaultValue,
-                    });
+                    ruleBuilder.addCondition({ type: option.type, operator: option.operators[0]?.value || 'equals', value: defaultValue });
                     setRuleDraft(ruleBuilder.getDraft());
                   }
                   setConditionDialogVisible(false);
@@ -734,7 +675,7 @@ export const RuleEditorScreen: React.FC = () => {
 
   const renderActionDialog = () => (
     <Portal>
-      <Dialog visible={actionDialogVisible} onDismiss={() => setActionDialogVisible(false)}>
+      <Dialog visible={actionDialogVisible} onDismiss={() => setActionDialogVisible(false)} style={{ borderRadius: borderRadius.xl, backgroundColor: theme.colors.surface }}>
         <Dialog.Title>添加动作</Dialog.Title>
         <Dialog.ScrollArea style={styles.dialogScrollArea}>
           <ScrollView>
@@ -747,16 +688,9 @@ export const RuleEditorScreen: React.FC = () => {
                   if (ruleBuilder) {
                     const defaultParams: Record<string, unknown> = {};
                     option.paramFields.forEach(field => {
-                      if (field.defaultValue !== undefined) {
-                        defaultParams[field.key] = field.defaultValue;
-                      }
+                      if (field.defaultValue !== undefined) { defaultParams[field.key] = field.defaultValue; }
                     });
-                    
-                    ruleBuilder.addAction({
-                      type: option.type,
-                      params: defaultParams,
-                      description: option.label,
-                    });
+                    ruleBuilder.addAction({ type: option.type, params: defaultParams, description: option.label });
                     setRuleDraft(ruleBuilder.getDraft());
                   }
                   setActionDialogVisible(false);
@@ -774,15 +708,15 @@ export const RuleEditorScreen: React.FC = () => {
 
   const renderTemplateDialog = () => (
     <Portal>
-      <Dialog visible={templateDialogVisible} onDismiss={() => setTemplateDialogVisible(false)}>
+      <Dialog visible={templateDialogVisible} onDismiss={() => setTemplateDialogVisible(false)} style={{ borderRadius: borderRadius.xl, backgroundColor: theme.colors.surface }}>
         <Dialog.Title>{selectedTemplate?.name}</Dialog.Title>
         <Dialog.Content>
-          <Text variant="bodyMedium" style={styles.templateDialogDesc}>
-            {selectedTemplate?.description}
-          </Text>
-          <View style={styles.templateDialogTags}>
+          <Text variant="bodyMedium" style={styles.templateDialogDesc}>{selectedTemplate?.description}</Text>
+          <View style={styles.tagContainer}>
             {selectedTemplate?.tags.map(tag => (
-              <Chip key={tag} compact style={styles.tagChip}>{tag}</Chip>
+              <View key={tag} style={[styles.customTag, { backgroundColor: theme.colors.primaryContainer }]}>
+                <Text style={[styles.tagText, { color: theme.colors.primary }]}>{tag}</Text>
+              </View>
             ))}
           </View>
         </Dialog.Content>
@@ -797,7 +731,7 @@ export const RuleEditorScreen: React.FC = () => {
 
   const renderDeleteDialog = () => (
     <Portal>
-      <Dialog visible={deleteDialogVisible} onDismiss={() => setDeleteDialogVisible(false)}>
+      <Dialog visible={deleteDialogVisible} onDismiss={() => setDeleteDialogVisible(false)} style={{ borderRadius: borderRadius.xl, backgroundColor: theme.colors.surface }}>
         <Dialog.Title>删除规则</Dialog.Title>
         <Dialog.Content>
           <Text variant="bodyMedium">确定要删除这条规则吗？此操作无法撤销。</Text>
@@ -815,7 +749,7 @@ export const RuleEditorScreen: React.FC = () => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={theme.colors.primary} />
         <Text style={styles.loadingText}>加载规则...</Text>
       </View>
     );
@@ -824,7 +758,6 @@ export const RuleEditorScreen: React.FC = () => {
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
       {editorMode === 'list' ? renderList() : renderEditor()}
-      
       {renderConditionDialog()}
       {renderActionDialog()}
       {renderTemplateDialog()}
@@ -836,204 +769,72 @@ export const RuleEditorScreen: React.FC = () => {
 // ==================== 样式 ====================
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  container: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-  },
-  searchbar: {
-    margin: 16,
-    marginBottom: 8,
-  },
-  viewToggle: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-  },
-  listContent: {
-    padding: 16,
-    paddingBottom: 100,
-  },
+  screen: { flex: 1 },
+  container: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 16, fontWeight: '600' },
+  searchbar: { margin: 16, marginBottom: 8, borderRadius: 999 },
+  viewToggle: { marginHorizontal: 16, marginBottom: 8 },
+  listContent: { padding: 16, paddingBottom: 100 },
   
-  // 规则卡片
-  ruleCard: {
-    marginBottom: 12,
+  // 👉 核心修复：移除边框，统一大圆角，宽敞内距
+  card: {
+    borderRadius: borderRadius.xl,
+    marginBottom: 16,
   },
-  ruleHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+  cardContent: {
+    padding: 20,
   },
-  ruleInfo: {
-    flex: 1,
-    marginRight: 16,
-  },
-  ruleMeta: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 12,
-    gap: 8,
-  },
-  chip: {
-    height: 28,
-  },
-  divider: {
-    marginVertical: 12,
-  },
-  ruleActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
+  ruleHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  ruleInfo: { flex: 1, marginRight: 16 },
+  divider: { marginVertical: 16, opacity: 0.5 },
+  ruleActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: -8 },
 
-  // 模板卡片
-  templateCard: {
-    marginBottom: 12,
-  },
-  templateHeader: {
-    flexDirection: 'row',
-  },
-  templateIcon: {
-    fontSize: 32,
-    marginRight: 12,
-  },
-  templateInfo: {
-    flex: 1,
-  },
-  templateTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  recommendedChip: {
-    height: 24,
-    backgroundColor: '#E8F5E9',
-  },
-  tagContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
-    gap: 8,
-  },
-  tagChip: {
-    height: 24,
-  },
+  templateHeader: { flexDirection: 'row', marginBottom: 12 },
+  templateIcon: { fontSize: 36, marginRight: 16 },
+  templateInfo: { flex: 1, justifyContent: 'center' },
+  templateTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  
+  // 👉 推荐徽章：极淡背景，小巧精致
+  recBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  recText: { fontSize: 10, fontWeight: '900' },
+
+  // 👉 核心修复：纯 View + Padding 做的标签，绝对不会被切断
+  tagContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 16, gap: 8 },
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', marginLeft: 52 },
+  customTag: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, marginRight: 8, marginBottom: 8 },
+  tagText: { fontSize: 12, fontWeight: '700', lineHeight: 18 },
 
   // 空状态
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  emptyText: {
-    opacity: 0.6,
-    textAlign: 'center',
-  },
-  emptyButton: {
-    marginTop: 16,
-  },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 48 },
+  emptyText: { opacity: 0.6, textAlign: 'center' },
+  emptyButton: { marginTop: 16, borderRadius: 999 },
 
   // FAB
-  fab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 16,
-  },
+  fab: { position: 'absolute', right: 16, bottom: 16, borderRadius: 16 },
 
-  // 编辑器
-  editorCard: {
-    margin: 16,
-  },
-  sectionTitle: {
-    marginBottom: 16,
-  },
-  sectionHeader: {
-    marginBottom: 12,
-  },
-  sectionDivider: {
-    marginVertical: 20,
-  },
-  input: {
-    marginBottom: 12,
-  },
-  logicButtons: {
-    marginTop: 8,
-  },
-  conditionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  conditionContent: {
-    flex: 1,
-  },
-  actionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  actionContent: {
-    flex: 1,
-  },
-  addButton: {
-    marginTop: 8,
-  },
-  settingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  priorityButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  priorityChip: {
-    height: 32,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: 8,
-  },
-  warningBanner: {
-    marginTop: 12,
-  },
-  editorActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    padding: 16,
-    gap: 12,
-  },
-  editorButton: {
-    minWidth: 100,
-  },
+  // 编辑器表单（基本保持）
+  editorCard: { margin: 16, borderRadius: borderRadius.xl },
+  sectionTitle: { marginBottom: 16, fontWeight: '800' },
+  sectionHeader: { marginBottom: 12 },
+  sectionDivider: { marginVertical: 20, opacity: 0.5 },
+  input: { marginBottom: 12 },
+  logicButtons: { marginTop: 8 },
+  conditionItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, marginBottom: 8 },
+  conditionContent: { flex: 1 },
+  actionItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, marginBottom: 8 },
+  actionContent: { flex: 1 },
+  addButton: { marginTop: 8, borderRadius: 999 },
+  settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  priorityButtons: { flexDirection: 'row', gap: 8 },
+  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 8 },
+  warningBanner: { marginTop: 12, borderRadius: 12 },
+  editorActions: { flexDirection: 'row', justifyContent: 'flex-end', padding: 16, gap: 12 },
+  editorButton: { minWidth: 100, borderRadius: 999 },
 
   // 对话框
-  dialogScrollArea: {
-    maxHeight: 400,
-  },
-  templateDialogDesc: {
-    marginBottom: 12,
-  },
-  templateDialogTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  dialogScrollArea: { maxHeight: 400, paddingHorizontal: 0 },
+  templateDialogDesc: { marginBottom: 16, color: '#666' },
 });
 
 export default RuleEditorScreen;

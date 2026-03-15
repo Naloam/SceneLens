@@ -1,12 +1,8 @@
-/**
- * LocationCard - 位置信息卡片组件
- */
-
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Text, Card, IconButton, Surface, Button } from 'react-native-paper';
+import { Text, Card, IconButton, Surface, Button, useTheme } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import { spacing } from '../../theme/spacing';
+import { spacing, borderRadius } from '../../theme/spacing';
 import type { Location } from '../../types';
 
 export interface LocationCardProps {
@@ -21,51 +17,50 @@ export const LocationCard: React.FC<LocationCardProps> = ({
   onRefresh,
 }) => {
   const navigation = useNavigation();
+  const theme = useTheme();
 
   return (
-    <Card mode="elevated" style={styles.card}>
-      <Card.Content>
+    <Card 
+      mode="elevated" 
+      elevation={1} // 恢复标准层级
+      style={[styles.card, { borderRadius: borderRadius.xl, backgroundColor: theme.colors.surface }]}
+    >
+      <Card.Content style={styles.cardContent}>
         <View style={styles.headerRow}>
-          <Text variant="titleLarge" style={styles.cardTitle}>
-            📍 当前位置
+          <Text variant="titleMedium" style={{ fontWeight: '600', color: theme.colors.onSurfaceVariant }}>
+             当前位置
           </Text>
-          <IconButton
-            icon="refresh"
-            size={20}
-            onPress={onRefresh}
-            disabled={isRefreshingLocation}
-            style={styles.refreshIconButton}
-          />
+          <View style={styles.actionsRow}>
+            <Button mode="text" compact onPress={() => navigation.navigate('LocationConfig' as never)} labelStyle={{ fontSize: 12, color: theme.colors.primary }}>
+              配置
+            </Button>
+            <IconButton icon="refresh" size={20} iconColor={theme.colors.primary} onPress={onRefresh} disabled={isRefreshingLocation} style={styles.refreshIconButton} />
+          </View>
         </View>
 
         {currentLocation ? (
-          <Surface style={styles.locationInfo} elevation={0}>
-            <Text variant="bodyMedium" style={styles.locationLabel}>
-              纬度: <Text style={styles.locationValue}>{currentLocation.latitude.toFixed(6)}</Text>
-            </Text>
-            <Text variant="bodyMedium" style={styles.locationLabel}>
-              经度: <Text style={styles.locationValue}>{currentLocation.longitude.toFixed(6)}</Text>
-            </Text>
-            <Text variant="bodySmall" style={styles.locationAccuracy}>
-              精度: ±{currentLocation.accuracy.toFixed(0)}米
-            </Text>
+          <Surface style={[styles.locationInfo, { backgroundColor: theme.colors.primaryContainer }]} elevation={0}>
+            <View style={styles.compactDataRow}>
+              <View style={styles.latLonGroup}>
+                <Text style={{ fontSize: 13, color: theme.colors.primary }}>
+                  纬度 <Text style={{ fontWeight: '800' }}>{currentLocation.latitude.toFixed(4)}</Text>
+                </Text>
+                <Text style={{ fontSize: 13, color: theme.colors.primary, marginLeft: 12 }}>
+                  经度 <Text style={{ fontWeight: '800' }}>{currentLocation.longitude.toFixed(4)}</Text>
+                </Text>
+              </View>
+              <Text style={{ fontSize: 12, color: theme.colors.primary, opacity: 0.7 }}>
+                ±{currentLocation.accuracy.toFixed(0)}m
+              </Text>
+            </View>
           </Surface>
         ) : (
-          <Surface style={styles.locationInfoEmpty} elevation={0}>
-            <Text variant="bodyMedium" style={styles.noLocationText}>
-              正在获取位置...
+          <Surface style={[styles.locationInfoEmpty, { backgroundColor: theme.colors.surfaceVariant }]} elevation={0}>
+            <Text style={{ fontSize: 13, color: theme.colors.onSurfaceVariant }}>
+              正在感知当前位置...
             </Text>
           </Surface>
         )}
-
-        <Button
-          mode="outlined"
-          onPress={() => navigation.navigate('LocationConfig' as never)}
-          icon="cog"
-          style={styles.locationConfigButton}
-        >
-          位置配置
-        </Button>
       </Card.Content>
     </Card>
   );
@@ -73,52 +68,27 @@ export const LocationCard: React.FC<LocationCardProps> = ({
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: spacing.md,
+    // 移除所有阴影和外边距
   },
-  cardTitle: {
-    marginBottom: spacing.md,
-    fontWeight: '700',
+  cardContent: {
+    padding: spacing.md, // 恢复标准边距
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
-  refreshIconButton: {
-    margin: 0,
-  },
+  actionsRow: { flexDirection: 'row', alignItems: 'center' },
+  refreshIconButton: { margin: 0 },
   locationInfo: {
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#E8F4FD',
-    marginBottom: 16,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.lg,
   },
-  locationInfoEmpty: {
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#F5F5F5',
-    marginBottom: 16,
-  },
-  locationLabel: {
-    marginBottom: 4,
-    color: '#424242',
-  },
-  locationValue: {
-    fontWeight: '600',
-    color: '#1976D2',
-  },
-  locationAccuracy: {
-    marginTop: 8,
-    opacity: 0.7,
-  },
-  noLocationText: {
-    textAlign: 'center',
-    opacity: 0.6,
-  },
-  locationConfigButton: {
-    borderColor: '#E0E0E0',
-  },
+  locationInfoEmpty: { padding: spacing.md, borderRadius: borderRadius.lg, alignItems: 'center' },
+  compactDataRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  latLonGroup: { flexDirection: 'row' },
 });
 
 export default LocationCard;

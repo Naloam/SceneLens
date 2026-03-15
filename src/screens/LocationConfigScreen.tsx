@@ -3,6 +3,11 @@
  * 用于设置家、办公室、地铁站的地理围栏
  */
 
+/**
+ * LocationConfigScreen - 位置配置屏幕
+ * 用于设置家、办公室、地铁站的地理围栏
+ */
+
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
@@ -33,6 +38,7 @@ import { geoFenceManager } from '../stores';
 import sceneBridge from '../core/SceneBridge';
 import { silentContextEngine } from '../core/SilentContextEngine';
 import type { GeoFence, Location, GeoFenceType } from '../types';
+import { spacing, borderRadius } from '../theme/spacing';
 
 type FenceConfigType = 'HOME' | 'OFFICE' | 'SUBWAY_STATION';
 
@@ -51,6 +57,7 @@ interface FenceConfig {
 
 export const LocationConfigScreen: React.FC = () => {
   const theme = useTheme();
+  const ultraLightBg = theme.colors.primary + '0A'; // 极淡的主题色背景
 
   // 状态管理
   const [isLoading, setIsLoading] = useState(false);
@@ -129,13 +136,8 @@ export const LocationConfigScreen: React.FC = () => {
   const initializeLocationConfig = async () => {
     setIsLoading(true);
     try {
-      // 初始化地理围栏管理器
       await geoFenceManager.initialize();
-
-      // 加载现有围栏
       const allFences = geoFenceManager.getAllGeoFences();
-
-      // 更新围栏配置
       const updatedConfigs = { ...fenceConfigs };
       for (const fence of allFences) {
         const type = fence.type as FenceConfigType;
@@ -145,7 +147,6 @@ export const LocationConfigScreen: React.FC = () => {
       }
       setFenceConfigs(updatedConfigs);
 
-      // 获取当前位置
       try {
         const location = await sceneBridge.getCurrentLocation();
         setCurrentLocation(location);
@@ -168,7 +169,6 @@ export const LocationConfigScreen: React.FC = () => {
     try {
       const location = await sceneBridge.getCurrentLocation();
       setCurrentLocation(location);
-      Alert.alert('成功', '位置已更新');
     } catch (error) {
       console.error('刷新位置失败:', error);
       Alert.alert('错误', '无法获取当前位置');
@@ -190,11 +190,9 @@ export const LocationConfigScreen: React.FC = () => {
 
     try {
       setIsLoading(true);
-
       const existing = config.fence;
 
       if (existing) {
-        // 更新现有围栏
         const updated = await geoFenceManager.updateGeoFence(existing.id, {
           name: config.name,
           latitude: currentLocation.latitude,
@@ -209,7 +207,6 @@ export const LocationConfigScreen: React.FC = () => {
           }));
         }
       } else {
-        // 创建新围栏
         const newFence = await geoFenceManager.createGeoFence(
           config.name,
           type,
@@ -224,9 +221,7 @@ export const LocationConfigScreen: React.FC = () => {
         }));
       }
 
-      // 刷新静默引擎的地理配置
       await silentContextEngine.refreshGeoConfiguration();
-
       Alert.alert('成功', `${config.displayName}已设置`);
     } catch (error) {
       console.error(`设置${config.displayName}失败:`, error);
@@ -241,9 +236,7 @@ export const LocationConfigScreen: React.FC = () => {
    */
   const deleteFence = async (type: FenceConfigType) => {
     const config = fenceConfigs[type];
-    if (!config.fence) {
-      return;
-    }
+    if (!config.fence) return;
 
     Alert.alert(
       '确认删除',
@@ -263,9 +256,7 @@ export const LocationConfigScreen: React.FC = () => {
                 [type]: { ...prev[type], fence: null },
               }));
 
-              // 刷新静默引擎的地理配置
               await silentContextEngine.refreshGeoConfiguration();
-
               Alert.alert('成功', `${config.displayName}已删除`);
             } catch (error) {
               console.error(`删除${config.displayName}失败:`, error);
@@ -280,7 +271,7 @@ export const LocationConfigScreen: React.FC = () => {
   };
 
   /**
-   * 更新围栏半径（滑块滑动时更新本地状态）
+   * 更新围栏半径
    */
   const handleSliderChange = useCallback((type: FenceConfigType, value: number) => {
     setSliderValues(prev => ({
@@ -296,7 +287,6 @@ export const LocationConfigScreen: React.FC = () => {
     const config = fenceConfigs[type];
     setManualInputType(type);
     
-    // 如果已有围栏，预填充坐标
     if (config.fence) {
       setManualLatitude(config.fence.latitude.toFixed(6));
       setManualLongitude(config.fence.longitude.toFixed(6));
@@ -318,17 +308,9 @@ export const LocationConfigScreen: React.FC = () => {
     const latNum = parseFloat(lat);
     const lngNum = parseFloat(lng);
     
-    if (isNaN(latNum) || isNaN(lngNum)) {
-      return { valid: false, error: '请输入有效的数字' };
-    }
-    
-    if (latNum < -90 || latNum > 90) {
-      return { valid: false, error: '纬度范围: -90 到 90' };
-    }
-    
-    if (lngNum < -180 || lngNum > 180) {
-      return { valid: false, error: '经度范围: -180 到 180' };
-    }
+    if (isNaN(latNum) || isNaN(lngNum)) return { valid: false, error: '请输入有效的数字' };
+    if (latNum < -90 || latNum > 90) return { valid: false, error: '纬度范围: -90 到 90' };
+    if (lngNum < -180 || lngNum > 180) return { valid: false, error: '经度范围: -180 到 180' };
     
     return { valid: true };
   };
@@ -352,7 +334,6 @@ export const LocationConfigScreen: React.FC = () => {
       Keyboard.dismiss();
 
       if (config.fence) {
-        // 更新现有围栏
         const updated = await geoFenceManager.updateGeoFence(config.fence.id, {
           latitude,
           longitude,
@@ -365,7 +346,6 @@ export const LocationConfigScreen: React.FC = () => {
           }));
         }
       } else {
-        // 创建新围栏
         const newFence = await geoFenceManager.createGeoFence(
           config.name,
           manualInputType,
@@ -380,9 +360,7 @@ export const LocationConfigScreen: React.FC = () => {
         }));
       }
 
-      // 刷新静默引擎的地理配置
       await silentContextEngine.refreshGeoConfiguration();
-
       setShowManualInput(false);
       Alert.alert('成功', `${config.displayName}位置已更新`);
     } catch (error) {
@@ -401,7 +379,6 @@ export const LocationConfigScreen: React.FC = () => {
     const lat = config.fence?.latitude ?? currentLocation?.latitude ?? 39.9042;
     const lng = config.fence?.longitude ?? currentLocation?.longitude ?? 116.4074;
 
-    // 地图应用的 deeplink 配置
     const mapApps = [
       {
         name: '高德地图',
@@ -421,15 +398,8 @@ export const LocationConfigScreen: React.FC = () => {
         package: 'com.tencent.map',
         webUrl: `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat},${lng};title:选择位置`,
       },
-      {
-        name: 'Google Maps',
-        deeplink: `geo:${lat},${lng}?q=${lat},${lng}`,
-        package: 'com.google.android.apps.maps',
-        webUrl: `https://www.google.com/maps?q=${lat},${lng}`,
-      },
     ];
 
-    // 显示地图应用选择对话框
     Alert.alert(
       '选择地图应用',
       '请选择要打开的地图应用来选择位置。\n\n提示：选择位置后，请复制坐标并使用"手动输入"功能填入。',
@@ -442,7 +412,6 @@ export const LocationConfigScreen: React.FC = () => {
               if (canOpen) {
                 await Linking.openURL(app.deeplink);
               } else {
-                // 尝试打开网页版
                 await Linking.openURL(app.webUrl);
               }
             } catch (error) {
@@ -457,51 +426,11 @@ export const LocationConfigScreen: React.FC = () => {
   };
 
   /**
-   * 从剪贴板粘贴坐标
-   */
-  const pasteFromClipboard = async () => {
-    try {
-      // React Native 需要使用 @react-native-clipboard/clipboard 包
-      // 这里提供一个简化的提示
-      Alert.alert(
-        '粘贴坐标',
-        '请在输入框中长按粘贴坐标。\n\n支持的格式：\n• 39.9042, 116.4074\n• 39.9042,116.4074\n• 纬度：39.9042 经度：116.4074',
-        [{ text: '知道了' }]
-      );
-    } catch (error) {
-      console.error('粘贴失败:', error);
-    }
-  };
-
-  /**
-   * 解析粘贴的坐标字符串
-   */
-  const parseCoordinateString = (text: string): { lat: string; lng: string } | null => {
-    // 尝试匹配常见的坐标格式
-    const patterns = [
-      /(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/,  // 39.9042, 116.4074
-      /纬度[：:]\s*(-?\d+\.?\d*)\s*经度[：:]\s*(-?\d+\.?\d*)/,
-      /lat[：:]\s*(-?\d+\.?\d*)\s*lng[：:]\s*(-?\d+\.?\d*)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = text.match(pattern);
-      if (match) {
-        return { lat: match[1], lng: match[2] };
-      }
-    }
-
-    return null;
-  };
-
-  /**
-   * 保存围栏半径（滑块停止时保存到存储）
+   * 保存围栏半径
    */
   const handleSliderComplete = useCallback(async (type: FenceConfigType, value: number) => {
     const config = fenceConfigs[type];
-    if (!config.fence) {
-      return;
-    }
+    if (!config.fence) return;
 
     try {
       const roundedValue = Math.round(value);
@@ -514,7 +443,6 @@ export const LocationConfigScreen: React.FC = () => {
           ...prev,
           [type]: { ...prev[type], fence: updated },
         }));
-        console.log(`[LocationConfigScreen] 围栏半径已更新: ${type} -> ${roundedValue}m`);
       }
     } catch (error) {
       console.error('更新半径失败:', error);
@@ -522,12 +450,6 @@ export const LocationConfigScreen: React.FC = () => {
     }
   }, [fenceConfigs]);
 
-  /**
-   * 更新围栏半径（旧方法，保留兼容性）
-   */
-  const updateFenceRadius = async (type: FenceConfigType, radius: number) => {
-    await handleSliderComplete(type, radius);
-  };
 
   /**
    * 渲染围栏卡片
@@ -539,17 +461,21 @@ export const LocationConfigScreen: React.FC = () => {
     return (
       <Card
         key={type}
-        mode={isSelected ? 'elevated' : 'outlined'}
+        // 👉 核心修复：彻底废弃 outlined 灰色边框，统一使用 elevated 白底阴影
+        mode="elevated"
+        elevation={1}
         style={[
           styles.fenceCard,
-          isSelected && styles.selectedFenceCard,
+          { backgroundColor: theme.colors.surface },
+          // 👉 选中时，不再用生硬的粗线，而是使用主题色的柔和边框
+          isSelected && { borderColor: theme.colors.primary, borderWidth: 2 }
         ]}
       >
-        <Card.Content>
+        <Card.Content style={styles.cardContent}>
           <View style={styles.fenceHeader}>
             <View style={styles.fenceHeaderLeft}>
               <Text style={styles.fenceIcon}>{config.icon}</Text>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text variant="titleMedium" style={styles.fenceName}>
                   {config.displayName}
                 </Text>
@@ -562,26 +488,26 @@ export const LocationConfigScreen: React.FC = () => {
               value={type}
               status={isSelected ? 'checked' : 'unchecked'}
               onPress={() => setSelectedTab(type)}
+              color={theme.colors.primary}
             />
           </View>
 
           {config.fence ? (
             <View style={styles.fenceDetails}>
               <Divider style={styles.divider} />
-              <Text variant="bodyMedium" style={styles.fenceDetailTitle}>
-                已设置围栏
-              </Text>
-              <Text variant="bodySmall">名称: {config.fence.name}</Text>
-              <Text variant="bodySmall">
-                位置: {config.fence.latitude.toFixed(6)}, {config.fence.longitude.toFixed(6)}
-              </Text>
+              <View style={styles.fenceDetailRow}>
+                 <Text variant="bodyMedium" style={{ fontWeight: '700' }}>已设置</Text>
+                 <Text variant="bodySmall" style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                   {config.fence.latitude.toFixed(5)}, {config.fence.longitude.toFixed(5)}
+                 </Text>
+              </View>
 
               {/* 半径滑块 */}
-              <View style={styles.radiusContainer}>
+              <Surface style={[styles.radiusContainer, { backgroundColor: theme.colors.surfaceVariant, opacity: 0.8 }]} elevation={0}>
                 <View style={styles.radiusHeader}>
-                  <Text variant="bodyMedium">围栏半径</Text>
-                  <Text variant="bodyMedium" style={{ color: theme.colors.primary }}>
-                    {sliderValues[type]} 米
+                  <Text variant="bodyMedium" style={{ fontWeight: '600' }}>围栏触发半径</Text>
+                  <Text variant="titleMedium" style={{ color: theme.colors.primary, fontWeight: '800' }}>
+                    {sliderValues[type]} m
                   </Text>
                 </View>
                 <Slider
@@ -592,97 +518,29 @@ export const LocationConfigScreen: React.FC = () => {
                   maximumValue={500}
                   step={10}
                   minimumTrackTintColor={theme.colors.primary}
-                  maximumTrackTintColor={theme.colors.surfaceVariant}
+                  maximumTrackTintColor={theme.colors.outlineVariant}
                   thumbTintColor={theme.colors.primary}
                   style={styles.slider}
                 />
-                <View style={styles.sliderLabels}>
-                  <Text variant="bodySmall" style={styles.sliderLabel}>50m</Text>
-                  <Text variant="bodySmall" style={styles.sliderLabel}>500m</Text>
-                </View>
-              </View>
+              </Surface>
 
               <View style={styles.fenceActions}>
-                <Button
-                  mode="outlined"
-                  onPress={() => setCurrentLocationAsFence(type)}
-                  disabled={!currentLocation || isLoading}
-                  icon="crosshairs-gps"
-                  style={styles.actionButton}
-                  compact
-                >
-                  当前位置
-                </Button>
-                <Button
-                  mode="outlined"
-                  onPress={() => openManualInput(type)}
-                  disabled={isLoading}
-                  icon="pencil"
-                  style={styles.actionButton}
-                  compact
-                >
-                  手动输入
-                </Button>
+                <Button mode="contained-tonal" onPress={() => setCurrentLocationAsFence(type)} disabled={!currentLocation || isLoading} icon="crosshairs-gps" style={styles.actionButton} labelStyle={{ fontSize: 13 }}>当前位置</Button>
+                <Button mode="contained-tonal" onPress={() => openManualInput(type)} disabled={isLoading} icon="pencil" style={styles.actionButton} labelStyle={{ fontSize: 13 }}>手动输入</Button>
               </View>
               <View style={styles.fenceActions}>
-                <Button
-                  mode="outlined"
-                  onPress={() => openMapForLocationPick(type)}
-                  disabled={isLoading}
-                  icon="map-search"
-                  style={styles.actionButton}
-                  compact
-                >
-                  从地图选择
-                </Button>
-                <Button
-                  mode="text"
-                  onPress={() => deleteFence(type)}
-                  disabled={isLoading}
-                  icon="delete"
-                  textColor={theme.colors.error}
-                  compact
-                >
-                  删除
-                </Button>
+                <Button mode="text" onPress={() => openMapForLocationPick(type)} disabled={isLoading} icon="map-search" style={styles.actionButton}>地图选择</Button>
+                <Button mode="text" onPress={() => deleteFence(type)} disabled={isLoading} icon="delete" textColor={theme.colors.error} style={styles.actionButton}>删除</Button>
               </View>
             </View>
           ) : (
             <View style={styles.noFenceContainer}>
-              <Text variant="bodyMedium" style={styles.noFenceText}>
-                尚未设置{config.displayName}
-              </Text>
+              <Text variant="bodyMedium" style={styles.noFenceText}>尚未设置{config.displayName}</Text>
               <View style={styles.setupButtonsRow}>
-                <Button
-                  mode="contained"
-                  onPress={() => setCurrentLocationAsFence(type)}
-                  disabled={!currentLocation || isLoading}
-                  icon="crosshairs-gps"
-                  style={styles.setupButton}
-                  compact
-                >
-                  当前位置
-                </Button>
-                <Button
-                  mode="outlined"
-                  onPress={() => openManualInput(type)}
-                  disabled={isLoading}
-                  icon="pencil"
-                  style={styles.setupButton}
-                  compact
-                >
-                  手动输入
-                </Button>
+                <Button mode="contained" buttonColor={theme.colors.primary} onPress={() => setCurrentLocationAsFence(type)} disabled={!currentLocation || isLoading} icon="crosshairs-gps" style={styles.setupButton}>设为当前</Button>
+                <Button mode="contained-tonal" onPress={() => openManualInput(type)} disabled={isLoading} icon="pencil" style={styles.setupButton}>手动输入</Button>
               </View>
-              <Button
-                mode="text"
-                onPress={() => openMapForLocationPick(type)}
-                disabled={isLoading}
-                icon="map-search"
-                style={{ marginTop: 8 }}
-              >
-                从地图应用选择位置
-              </Button>
+              <Button mode="text" onPress={() => openMapForLocationPick(type)} disabled={isLoading} icon="map-search" style={{ marginTop: 4 }}>从地图应用选择位置</Button>
             </View>
           )}
         </Card.Content>
@@ -692,168 +550,92 @@ export const LocationConfigScreen: React.FC = () => {
 
   if (isLoading && !fenceConfigs.HOME.fence && !fenceConfigs.OFFICE.fence) {
     return (
-      <Surface style={styles.loadingContainer} elevation={0}>
-        <View style={styles.loadingContent}>
-          <Text variant="bodyLarge" style={{ color: theme.colors.primary }}>
-            正在加载位置配置...
-          </Text>
-          <ProgressBar indeterminate style={styles.progressBar} />
-        </View>
-      </Surface>
+      <View style={styles.loadingContainer}>
+        <Text variant="bodyLarge" style={{ color: theme.colors.primary, fontWeight: '600' }}>正在加载配置...</Text>
+        <ProgressBar indeterminate style={styles.progressBar} color={theme.colors.primary} />
+      </View>
     );
   }
 
-  const currentConfig = fenceConfigs[selectedTab];
-
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      {/* 标题区域 */}
-      <Surface style={styles.header} elevation={1}>
-        <Text variant="headlineMedium" style={styles.title}>
-          位置配置
-        </Text>
-        <Text variant="bodyMedium" style={styles.subtitle}>
-          设置常用的地理位置，用于智能场景识别
-        </Text>
+    <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]} contentContainerStyle={styles.contentContainer}>
+      
+      {/* 顶部标题区域：采用超淡色块包裹 */}
+      <Surface style={[styles.header, { backgroundColor: ultraLightBg }]} elevation={0}>
+        <Text variant="headlineMedium" style={[styles.title, { color: theme.colors.onSurface }]}>位置配置</Text>
+        <Text variant="bodyMedium" style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>设置常用的地理位置，用于智能场景识别</Text>
       </Surface>
 
-      {/* 当前位置信息卡片 */}
-      <Card mode="elevated" style={styles.card}>
-        <Card.Content>
+      {/* 当前位置卡片：大圆角 */}
+      <Card mode="elevated" elevation={1} style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+        <Card.Content style={styles.cardContent}>
           <View style={styles.cardHeader}>
-            <Text variant="titleMedium" style={styles.cardTitle}>
-              📍 当前位置
-            </Text>
-            <Button
-              mode="text"
-              onPress={refreshLocation}
-              disabled={isRefreshing}
-              icon="refresh"
-              compact
-            >
-              刷新
-            </Button>
+            <Text variant="titleMedium" style={styles.cardTitle}>📍 当前位置</Text>
+            <Button mode="text" onPress={refreshLocation} disabled={isRefreshing} icon="refresh" compact>刷新</Button>
           </View>
 
           {currentLocation ? (
-            <Surface style={styles.locationInfo} elevation={0}>
-              <Text variant="bodyMedium" style={{ color: theme.colors.primary }}>
-                纬度: {currentLocation.latitude.toFixed(6)}
-              </Text>
-              <Text variant="bodyMedium" style={{ color: theme.colors.primary }}>
-                经度: {currentLocation.longitude.toFixed(6)}
-              </Text>
-              <Text variant="bodySmall" style={styles.locationAccuracy}>
-                精度: ±{currentLocation.accuracy.toFixed(0)}米
-              </Text>
+            <Surface style={[styles.locationInfo, { backgroundColor: ultraLightBg }]} elevation={0}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                 <View>
+                    <Text variant="bodyMedium" style={{ color: theme.colors.primary, fontWeight: '700' }}>{currentLocation.latitude.toFixed(5)}</Text>
+                    <Text variant="bodySmall" style={{ color: theme.colors.primary, opacity: 0.7 }}>纬度</Text>
+                 </View>
+                 <View>
+                    <Text variant="bodyMedium" style={{ color: theme.colors.primary, fontWeight: '700' }}>{currentLocation.longitude.toFixed(5)}</Text>
+                    <Text variant="bodySmall" style={{ color: theme.colors.primary, opacity: 0.7 }}>经度</Text>
+                 </View>
+                 <View>
+                    <Text variant="bodyMedium" style={{ color: theme.colors.primary, fontWeight: '700' }}>±{currentLocation.accuracy.toFixed(0)}m</Text>
+                    <Text variant="bodySmall" style={{ color: theme.colors.primary, opacity: 0.7 }}>精度</Text>
+                 </View>
+              </View>
             </Surface>
           ) : (
-            <Text variant="bodyMedium" style={styles.noLocationText}>
-              无法获取当前位置，请检查位置权限
-            </Text>
+            <Text variant="bodyMedium" style={styles.noLocationText}>无法获取当前位置，请检查位置权限</Text>
           )}
         </Card.Content>
       </Card>
 
-      {/* 围栏配置卡片列表 */}
-      <Text variant="titleLarge" style={styles.sectionTitle}>
-        地理围栏配置
-      </Text>
+      <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onSurfaceVariant }]}>地理围栏配置</Text>
       {(Object.keys(fenceConfigs) as FenceConfigType[]).map(renderFenceCard)}
 
-      {/* 说明卡片 */}
-      <Card mode="outlined" style={[styles.card, styles.infoCard]}>
-        <Card.Content>
-          <Text variant="titleMedium" style={styles.infoTitle}>
-            💡 使用说明
-          </Text>
-          <Divider style={styles.divider} />
-          <Text variant="bodyMedium" style={styles.infoText}>
-            • 地理围栏用于识别您所在的地点，自动触发相应的场景
-          </Text>
-          <Text variant="bodyMedium" style={styles.infoText}>
-            • 围栏半径决定了触发范围，建议根据实际情况调整
-          </Text>
-          <Text variant="bodyMedium" style={styles.infoText}>
-            • 支持从地图应用选择位置或手动输入经纬度
-          </Text>
-          <Text variant="bodyMedium" style={styles.infoText}>
-            • 位置信息仅在本地使用，不会上传到服务器
-          </Text>
+      {/* 说明卡片：抛弃直边框，融入大圆角 */}
+      <Card mode="elevated" elevation={0} style={[styles.card, { backgroundColor: '#F0FDF4' }]}>
+        <Card.Content style={styles.cardContent}>
+          <Text variant="titleMedium" style={styles.infoTitle}>💡 使用说明</Text>
+          <View style={{ gap: 6, marginTop: 8 }}>
+            <Text style={styles.infoText}>• 地理围栏用于识别您所在的地点，自动触发场景</Text>
+            <Text style={styles.infoText}>• 围栏半径决定了触发范围，建议根据实际情况调整</Text>
+            <Text style={styles.infoText}>• 支持从地图应用选择位置或手动输入经纬度</Text>
+            <Text style={styles.infoText}>• 位置信息仅在本地使用，不会上传到服务器</Text>
+          </View>
         </Card.Content>
       </Card>
 
-      {/* 底部间距 */}
       <View style={styles.bottomSpacer} />
 
-      {/* 手动输入坐标对话框 */}
+      {/* 手动输入弹窗 */}
       <Portal>
         <Modal
           visible={showManualInput}
           onDismiss={() => setShowManualInput(false)}
-          contentContainerStyle={styles.modalContainer}
+          contentContainerStyle={[styles.modalContainer, { backgroundColor: theme.colors.surface }]}
         >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text variant="titleLarge" style={styles.modalTitle}>
-                手动输入坐标
-              </Text>
-              <IconButton
-                icon="close"
-                size={24}
-                onPress={() => setShowManualInput(false)}
-              />
+              <Text variant="titleLarge" style={[styles.modalTitle, { color: theme.colors.onSurface }]}>手动输入</Text>
+              <IconButton icon="close" size={24} onPress={() => setShowManualInput(false)} />
             </View>
             
-            <Text variant="bodyMedium" style={styles.modalSubtitle}>
-              设置 {fenceConfigs[manualInputType]?.displayName} 的位置坐标
-            </Text>
+            <Text variant="bodyMedium" style={styles.modalSubtitle}>设置 {fenceConfigs[manualInputType]?.displayName} 的坐标</Text>
 
-            <TextInput
-              label="纬度 (Latitude)"
-              value={manualLatitude}
-              onChangeText={setManualLatitude}
-              keyboardType="numeric"
-              placeholder="例如：39.9042"
-              style={styles.input}
-              mode="outlined"
-              right={<TextInput.Affix text="°" />}
-            />
-
-            <TextInput
-              label="经度 (Longitude)"
-              value={manualLongitude}
-              onChangeText={setManualLongitude}
-              keyboardType="numeric"
-              placeholder="例如：116.4074"
-              style={styles.input}
-              mode="outlined"
-              right={<TextInput.Affix text="°" />}
-            />
-
-            <Text variant="bodySmall" style={styles.coordinateHint}>
-              💡 提示：可以从地图应用中获取精确坐标，格式为"纬度, 经度"
-            </Text>
+            <TextInput label="纬度 (Latitude)" value={manualLatitude} onChangeText={setManualLatitude} keyboardType="numeric" style={styles.input} mode="outlined" />
+            <TextInput label="经度 (Longitude)" value={manualLongitude} onChangeText={setManualLongitude} keyboardType="numeric" style={styles.input} mode="outlined" />
 
             <View style={styles.modalActions}>
-              <Button
-                mode="outlined"
-                onPress={() => openMapForLocationPick(manualInputType)}
-                icon="map-search"
-                style={styles.modalButton}
-              >
-                从地图获取
-              </Button>
-              <Button
-                mode="contained"
-                onPress={saveManualCoordinates}
-                disabled={!manualLatitude || !manualLongitude || isLoading}
-                loading={isLoading}
-                icon="check"
-                style={styles.modalButton}
-              >
-                保存
-              </Button>
+              <Button mode="text" onPress={() => openMapForLocationPick(manualInputType)} icon="map-search" style={styles.modalButton}>从地图获取</Button>
+              <Button mode="contained" onPress={saveManualCoordinates} disabled={!manualLatitude || !manualLongitude || isLoading} loading={isLoading} style={styles.modalButton}>保存</Button>
             </View>
           </View>
         </Modal>
@@ -863,210 +645,61 @@ export const LocationConfigScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  contentContainer: {
-    padding: 16,
-    paddingTop: 60,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  loadingContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  progressBar: {
-    marginTop: 16,
-    width: 200,
-  },
-  header: {
-    padding: 16,
-    marginBottom: 16,
-    borderRadius: 12,
-  },
-  title: {
-    fontWeight: 'bold',
-  },
-  subtitle: {
-    marginTop: 4,
-    opacity: 0.7,
-  },
-  card: {
-    marginBottom: 16,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  cardTitle: {
-    fontWeight: '600',
-  },
-  locationInfo: {
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#E3F2FD',
-  },
-  locationAccuracy: {
-    marginTop: 4,
-    opacity: 0.7,
-  },
-  noLocationText: {
-    textAlign: 'center',
-    paddingVertical: 16,
-    opacity: 0.6,
-  },
-  sectionTitle: {
-    fontWeight: '700',
-    marginBottom: 12,
-    marginTop: 8,
-  },
-  fenceCard: {
-    marginBottom: 12,
-  },
-  selectedFenceCard: {
-    borderColor: '#6750A4',
-    borderWidth: 2,
-  },
-  fenceHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  fenceHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  fenceIcon: {
-    fontSize: 28,
-    marginRight: 12,
-  },
-  fenceName: {
-    fontWeight: '600',
-  },
-  fenceDescription: {
-    marginTop: 2,
-    opacity: 0.7,
-  },
-  fenceDetails: {
-    marginTop: 8,
-  },
-  fenceDetailTitle: {
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  divider: {
-    marginVertical: 8,
-  },
-  radiusContainer: {
-    marginTop: 12,
-  },
-  radiusHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  slider: {
-    width: '100%',
-    height: 40,
-  },
-  sliderLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  sliderLabel: {
-    opacity: 0.6,
-  },
-  fenceActions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-  },
-  actionButton: {
-    flex: 1,
-  },
-  noFenceContainer: {
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  noFenceText: {
-    marginBottom: 12,
-    opacity: 0.6,
-  },
-  setButton: {
-    minWidth: 150,
-  },
-  infoCard: {
-    backgroundColor: '#E8F5E9',
-    borderColor: '#81C784',
-  },
-  infoTitle: {
-    fontWeight: '600',
-    color: '#2E7D32',
-    marginBottom: 8,
-  },
-  infoText: {
-    color: '#2E7D32',
-    lineHeight: 22,
-    marginBottom: 4,
-  },
-  bottomSpacer: {
-    height: 32,
-  },
-  // 新增样式
-  setupButtonsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 8,
-  },
-  setupButton: {
-    flex: 1,
-  },
-  modalContainer: {
-    backgroundColor: 'white',
-    margin: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  modalContent: {
-    padding: 20,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  modalTitle: {
-    fontWeight: '700',
-  },
-  modalSubtitle: {
-    opacity: 0.7,
-    marginBottom: 20,
-  },
-  input: {
-    marginBottom: 16,
-  },
-  coordinateHint: {
-    opacity: 0.6,
-    marginBottom: 20,
-    lineHeight: 18,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  modalButton: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  contentContainer: { padding: 16, paddingTop: 20 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  progressBar: { marginTop: 16, width: 200, borderRadius: 4 },
+  
+  // 👉 核心修复：整体全部使用 borderRadius.xl
+  header: { padding: 20, marginBottom: 16, borderRadius: borderRadius.xl },
+  title: { fontWeight: '800' },
+  subtitle: { marginTop: 4, fontWeight: '600' },
+  
+  card: { marginBottom: 16, borderRadius: borderRadius.xl },
+  cardContent: { padding: 20 }, // 内部放宽边距
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  cardTitle: { fontWeight: '800' },
+  
+  locationInfo: { padding: 16, borderRadius: 16 },
+  noLocationText: { textAlign: 'center', paddingVertical: 16, opacity: 0.6 },
+  
+  sectionTitle: { fontWeight: '800', marginBottom: 16, marginLeft: 4 },
+  
+  fenceCard: { marginBottom: 16, borderRadius: borderRadius.xl, borderWidth: 0 },
+  fenceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  fenceHeaderLeft: { flexDirection: 'row', alignItems: 'flex-start', flex: 1, marginRight: 8 },
+  fenceIcon: { fontSize: 32, marginRight: 16 },
+  fenceName: { fontWeight: '800', fontSize: 18 },
+  fenceDescription: { marginTop: 4, opacity: 0.6, lineHeight: 18 },
+  
+  fenceDetails: { marginTop: 16 },
+  fenceDetailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  divider: { marginVertical: 12, opacity: 0.5 },
+  
+  radiusContainer: { padding: 16, borderRadius: 16, marginTop: 4 },
+  radiusHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  slider: { width: '100%', height: 40 },
+  
+  fenceActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  actionButton: { flex: 1, borderRadius: 12 },
+  
+  noFenceContainer: { alignItems: 'center', paddingVertical: 20 },
+  noFenceText: { marginBottom: 16, opacity: 0.6, fontWeight: '600' },
+  setupButtonsRow: { flexDirection: 'row', gap: 12, marginBottom: 8 },
+  setupButton: { flex: 1, borderRadius: 12 },
+  
+  infoTitle: { fontWeight: '800', color: '#166534', marginBottom: 4 },
+  infoText: { color: '#15803D', lineHeight: 24, fontWeight: '600' },
+  bottomSpacer: { height: 40 },
+  
+  modalContainer: { margin: 20, borderRadius: borderRadius.xl, overflow: 'hidden' },
+  modalContent: { padding: 24 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  modalTitle: { fontWeight: '800' },
+  modalSubtitle: { opacity: 0.6, marginBottom: 20 },
+  input: { marginBottom: 16 },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 12 },
+  modalButton: { flex: 1, borderRadius: 12 },
 });
 
 export default LocationConfigScreen;

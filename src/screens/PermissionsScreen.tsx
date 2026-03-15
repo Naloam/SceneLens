@@ -11,10 +11,10 @@ import {
   Card,
   List,
   Button,
-  Chip,
   Divider,
   Banner,
   ActivityIndicator,
+  Surface,
   useTheme,
 } from 'react-native-paper';
 import { usePermissions } from '../hooks/usePermissions';
@@ -24,7 +24,7 @@ import {
   PermissionStatus,
   PERMISSION_GROUPS as PM_GROUPS,
 } from '../utils/PermissionManager';
-import { spacing } from '../theme/spacing';
+import { spacing, borderRadius } from '../theme/spacing';
 
 // ==================== 权限配置 ====================
 
@@ -58,12 +58,12 @@ const PERMISSION_GROUPS = [
 ];
 
 const STATUS_COLORS: Record<PermissionStatus, string> = {
-  [PermissionStatus.GRANTED]: '#4CAF50',
-  [PermissionStatus.DENIED]: '#F44336',
-  [PermissionStatus.PERMANENTLY_DENIED]: '#F44336',
-  [PermissionStatus.UNDETERMINED]: '#9E9E9E',
-  [PermissionStatus.REQUIRES_SETTINGS]: '#FF9800',
-  [PermissionStatus.UNAVAILABLE]: '#9E9E9E',
+  [PermissionStatus.GRANTED]: '#16A34A', // 更现代的绿色
+  [PermissionStatus.DENIED]: '#DC2626', // 更现代的红色
+  [PermissionStatus.PERMANENTLY_DENIED]: '#DC2626',
+  [PermissionStatus.UNDETERMINED]: '#9CA3AF', // 更柔和的灰色
+  [PermissionStatus.REQUIRES_SETTINGS]: '#EA580C', // 更活泼的橙色
+  [PermissionStatus.UNAVAILABLE]: '#9CA3AF',
 };
 
 const STATUS_LABELS: Record<PermissionStatus, string> = {
@@ -79,6 +79,8 @@ const STATUS_LABELS: Record<PermissionStatus, string> = {
 
 export const PermissionsScreen: React.FC = () => {
   const theme = useTheme();
+  const ultraLightBg = theme.colors.primary + '0A'; // 极淡主题色背景
+
   const {
     permissions,
     checking,
@@ -145,37 +147,42 @@ export const PermissionsScreen: React.FC = () => {
       <List.Item
         key={permission}
         title={title}
+        titleStyle={{ fontWeight: '700', fontSize: 15, color: theme.colors.onSurface }}
         description={description}
+        descriptionStyle={{ opacity: 0.7, marginTop: 2, lineHeight: 18 }}
         descriptionNumberOfLines={2}
         left={props => (
           <List.Icon 
             {...props} 
             icon={getPermissionIcon(permission)}
             color={STATUS_COLORS[statusValue]}
+            style={{ marginLeft: 8, marginRight: 16, alignSelf: 'center' }} 
           />
         )}
+        
         right={() => (
           <View style={styles.rightContainer}>
-            <Chip
-              mode="flat"
-              textStyle={{ fontSize: 12 }}
-              style={[
-                styles.statusChip,
-                { backgroundColor: STATUS_COLORS[statusValue] + '20' },
-              ]}
-            >
-              {STATUS_LABELS[statusValue]}
-            </Chip>
+            {/* 修复：使用无高度限制的 View 代替 Chip，靠 padding 撑开，绝不切字 */}
+            <View style={[styles.statusPill, { backgroundColor: STATUS_COLORS[statusValue] + '1A' }]}>
+              <Text style={{ color: STATUS_COLORS[statusValue], fontSize: 11, fontWeight: '800' }}>
+                {STATUS_LABELS[statusValue]}
+              </Text>
+            </View>
+            
             {!isGranted && (
               <Button
-                mode="text"
+                mode="contained-tonal"
                 compact
                 onPress={() => handleRequestPermission(permission)}
                 loading={requesting}
                 disabled={requesting}
+                buttonColor={theme.colors.primaryContainer}
+                textColor={theme.colors.primary}
+                style={{ borderRadius: 999, marginLeft: 8 }}
+                labelStyle={{ fontSize: 12, fontWeight: '700', marginHorizontal: 12 }}
               >
                 {statusValue === PermissionStatus.REQUIRES_SETTINGS || 
-                 statusValue === PermissionStatus.PERMANENTLY_DENIED ? '设置' : '授权'}
+                 statusValue === PermissionStatus.PERMANENTLY_DENIED ? '去设置' : '授权'}
               </Button>
             )}
           </View>
@@ -189,29 +196,33 @@ export const PermissionsScreen: React.FC = () => {
     const grantedCount = group.permissions.filter(
       p => permissions.get(p)?.status === PermissionStatus.GRANTED
     ).length;
+    const isAllGranted = grantedCount === group.permissions.length;
 
     return (
-      <Card key={index} style={styles.groupCard}>
-        <Card.Title
-          title={group.title}
-          subtitle={`${grantedCount}/${group.permissions.length} 已授权`}
-          right={() => (
-            <Text 
-              style={[
-                styles.progressText,
-                { color: grantedCount === group.permissions.length ? '#4CAF50' : '#FF9800' },
-              ]}
-            >
-              {Math.round((grantedCount / group.permissions.length) * 100)}%
+      <Card key={index} mode="elevated" elevation={1} style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+        <View style={styles.cardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text variant="titleMedium" style={{ fontWeight: '800', color: theme.colors.onSurface }}>
+              {group.title}
             </Text>
-          )}
-        />
-        <Card.Content>
-          <Text variant="bodySmall" style={styles.groupDescription}>
-            {group.description}
-          </Text>
-          <Divider style={styles.divider} />
-          {group.permissions.map(renderPermissionItem)}
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
+              {group.description}
+            </Text>
+          </View>
+          <Surface style={[styles.progressBadge, { backgroundColor: isAllGranted ? '#DCFCE7' : '#FFF7ED' }]} elevation={0}>
+             <Text style={{ fontWeight: '800', fontSize: 12, color: isAllGranted ? '#16A34A' : '#EA580C' }}>
+               {grantedCount}/{group.permissions.length} 已授权
+             </Text>
+          </Surface>
+        </View>
+        
+        <Card.Content style={{ paddingHorizontal: 8 }}>
+          {group.permissions.map((p, i) => (
+            <React.Fragment key={p}>
+              {renderPermissionItem(p)}
+              {i < group.permissions.length - 1 && <Divider style={{ opacity: 0.4 }} />}
+            </React.Fragment>
+          ))}
         </Card.Content>
       </Card>
     );
@@ -226,89 +237,89 @@ export const PermissionsScreen: React.FC = () => {
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
       contentContainerStyle={styles.contentContainer}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.colors.primary]} />
       }
     >
-      {/* 顶部 Banner */}
+      {/* 顶部 Banner 换成柔和的背景卡片 */}
       {showBanner && totalProgress < 100 && (
-        <Banner
-          visible={showBanner}
-          actions={[
-            {
-              label: '稍后',
-              onPress: () => setShowBanner(false),
-            },
-            {
-              label: '一键授权',
-              onPress: handleRequestAll,
-            },
-          ]}
-          icon="shield-check"
-        >
-          为了获得最佳体验，建议授予所有必要权限。当前已授权 {totalProgress}%。
-        </Banner>
+        <Surface style={[styles.bannerCard, { backgroundColor: ultraLightBg }]} elevation={0}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+            <List.Icon icon="shield-alert" color={theme.colors.primary} style={{ margin: 0, marginRight: 12 }} />
+            <Text style={{ flex: 1, color: theme.colors.onSurfaceVariant, lineHeight: 20 }}>
+              为了获得最佳体验，建议授予所有必要权限。当前已授权 {totalProgress}%。
+            </Text>
+          </View>
+          <View style={styles.bannerActions}>
+            <Button mode="text" onPress={() => setShowBanner(false)} textColor={theme.colors.onSurfaceVariant} style={{ borderRadius: 999 }}>稍后</Button>
+            <Button mode="contained" onPress={handleRequestAll} buttonColor={theme.colors.primary} style={{ borderRadius: 999, paddingHorizontal: 8 }}>一键授权</Button>
+          </View>
+        </Surface>
       )}
 
       {/* 加载指示器 */}
       {checking && (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" />
-          <Text style={styles.loadingText}>检查权限状态...</Text>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={[styles.loadingText, { color: theme.colors.primary }]}>检查权限状态...</Text>
         </View>
       )}
 
       {/* 总体进度卡片 */}
-      <Card style={styles.summaryCard}>
+      <Card mode="elevated" elevation={1} style={[styles.card, { backgroundColor: theme.colors.surface }]}>
         <Card.Content>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
-              <Text variant="headlineMedium" style={{ color: '#4CAF50' }}>
+              <Text variant="headlineMedium" style={{ color: '#16A34A', fontWeight: '900' }}>
                 {grantedTotal}
               </Text>
-              <Text variant="bodySmall">已授权</Text>
+              <Text variant="bodySmall" style={{ opacity: 0.6, fontWeight: '700' }}>已授权</Text>
             </View>
             <View style={styles.summaryItem}>
-              <Text variant="headlineMedium" style={{ color: '#FF9800' }}>
+              <Text variant="headlineMedium" style={{ color: '#EA580C', fontWeight: '900' }}>
                 {allPermissions.length - grantedTotal}
               </Text>
-              <Text variant="bodySmall">待授权</Text>
+              <Text variant="bodySmall" style={{ opacity: 0.6, fontWeight: '700' }}>待授权</Text>
             </View>
             <View style={styles.summaryItem}>
-              <Text variant="headlineMedium" style={{ color: theme.colors.primary }}>
+              <Text variant="headlineMedium" style={{ color: theme.colors.primary, fontWeight: '900' }}>
                 {totalProgress}%
               </Text>
-              <Text variant="bodySmall">完成度</Text>
+              <Text variant="bodySmall" style={{ opacity: 0.6, fontWeight: '700' }}>完成度</Text>
             </View>
           </View>
-        </Card.Content>
-        <Card.Actions>
+          
           <Button 
             mode="contained" 
             onPress={handleRequestAll}
             loading={requesting}
             disabled={requesting || totalProgress === 100}
-            icon="shield-check"
+            icon={totalProgress === 100 ? "check-decagram" : "shield-check"}
+            style={{ borderRadius: borderRadius.lg, marginTop: 12 }}
+            contentStyle={{ height: 48 }}
           >
             {totalProgress === 100 ? '全部已授权' : '一键授权必要权限'}
           </Button>
-        </Card.Actions>
+        </Card.Content>
       </Card>
 
       {/* 权限分组列表 */}
       {PERMISSION_GROUPS.map(renderPermissionGroup)}
 
-      {/* 底部提示 */}
-      <Card style={styles.noteCard}>
+      {/* 底部提示卡片 - 采用极淡主题色，告别生硬黄底 */}
+      <Card mode="elevated" elevation={0} style={[styles.card, { backgroundColor: theme.colors.primaryContainer, opacity: 0.8 }]}>
         <Card.Content>
-          <Text variant="bodySmall" style={styles.noteText}>
-            💡 提示：某些权限（如"修改系统设置"、"勿扰模式"）需要在系统设置中手动开启。
-            点击"设置"按钮可以直接跳转到对应的设置页面。
+          <Text variant="titleSmall" style={{ fontWeight: '800', color: theme.colors.primary, marginBottom: 8 }}>
+            💡 权限提示
+          </Text>
+          <Text variant="bodySmall" style={{ color: theme.colors.primary, lineHeight: 18, fontWeight: '600' }}>
+            某些高级权限（如"修改系统设置"、"勿扰模式"）无法一键请求，需要在系统设置中手动开启。点击"去设置"按钮可以直接跳转。
           </Text>
         </Card.Content>
       </Card>
+      
     </ScrollView>
   );
 };
@@ -318,61 +329,75 @@ export const PermissionsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   contentContainer: {
     padding: spacing.md,
-    paddingBottom: 100,
+    paddingBottom: 60,
   },
+  
+  card: {
+    marginBottom: spacing.md,
+    borderRadius: borderRadius.xl,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: 20,
+    paddingBottom: 12,
+  },
+  
+  bannerCard: {
+    padding: 20,
+    borderRadius: borderRadius.xl,
+    marginBottom: spacing.md,
+  },
+  bannerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 12,
+    gap: 8,
+  },
+  
   loadingContainer: {
     alignItems: 'center',
     padding: spacing.xl,
   },
   loadingText: {
     marginTop: spacing.sm,
-    color: '#666',
+    fontWeight: '700',
   },
-  summaryCard: {
-    marginBottom: spacing.md,
-  },
+  
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
   },
   summaryItem: {
     alignItems: 'center',
   },
-  groupCard: {
-    marginBottom: spacing.md,
+  
+  progressBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginLeft: 12,
   },
-  groupDescription: {
-    color: '#666',
-    marginBottom: spacing.sm,
-  },
-  divider: {
-    marginVertical: spacing.sm,
-  },
+  
   listItem: {
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.sm,
   },
   rightContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    justifyContent: 'flex-end',
   },
-  statusChip: {
-    height: 28,
-  },
-  progressText: {
-    marginRight: spacing.md,
-    fontWeight: 'bold',
-  },
-  noteCard: {
-    backgroundColor: '#FFF8E1',
-  },
-  noteText: {
-    color: '#795548',
+  
+  statusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    alignSelf: 'center',
   },
 });
 
