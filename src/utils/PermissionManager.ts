@@ -187,7 +187,66 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
 
 // ==================== Native Module 接口 ====================
 
-const { SystemSettingsModule } = NativeModules;
+const { SystemSettingsModule, OppoPermission } = NativeModules;
+
+// ==================== OPPO 权限跳转工具 ====================
+
+/**
+ * PermissionType 到 Android 原生权限字符串的映射
+ * 用于向 OPPO 接口传入受阻权限列表
+ */
+const PERMISSION_TO_ANDROID_STRING: Partial<Record<PermissionType, string>> = {
+  [PermissionType.LOCATION_FINE]: 'android.permission.ACCESS_FINE_LOCATION',
+  [PermissionType.LOCATION_COARSE]: 'android.permission.ACCESS_COARSE_LOCATION',
+  [PermissionType.LOCATION_BACKGROUND]: 'android.permission.ACCESS_BACKGROUND_LOCATION',
+  [PermissionType.CALENDAR_READ]: 'android.permission.READ_CALENDAR',
+  [PermissionType.CALENDAR_WRITE]: 'android.permission.WRITE_CALENDAR',
+  [PermissionType.ACTIVITY_RECOGNITION]: 'android.permission.ACTIVITY_RECOGNITION',
+  [PermissionType.NOTIFICATIONS]: 'android.permission.POST_NOTIFICATIONS',
+  [PermissionType.MICROPHONE]: 'android.permission.RECORD_AUDIO',
+  [PermissionType.CAMERA]: 'android.permission.CAMERA',
+  [PermissionType.STORAGE_READ]: 'android.permission.READ_EXTERNAL_STORAGE',
+  [PermissionType.STORAGE_WRITE]: 'android.permission.WRITE_EXTERNAL_STORAGE',
+};
+
+/**
+ * 尝试使用 OPPO 优化跳转，失败时降级为标准应用设置页
+ *
+ * @param blockedPermissions 受阻的权限列表（同一权限组时会触发高亮效果）
+ */
+async function openOppoPermissionSettingsWithFallback(
+  blockedPermissions: PermissionType[]
+): Promise<void> {
+  // 将 PermissionType 转换为 Android 原生权限字符串
+  const androidPermissions = blockedPermissions
+    .map(p => PERMISSION_TO_ANDROID_STRING[p])
+    .filter((s): s is string => !!s);
+
+  console.log('[PermissionManager] OPPO跳转: NativeModules.OppoPermission =', !!OppoPermission);
+  console.log('[PermissionManager] OPPO跳转: 受阻权限列表 =', androidPermissions);
+
+  // 优先尝试 OPPO 专属接口
+  if (OppoPermission && typeof OppoPermission.openOppoPermissionSettings === 'function') {
+    try {
+      const isOppo: boolean = await OppoPermission.isOppoDevice();
+      const colorOsVersion: string = await OppoPermission.getColorOsVersion();
+      console.log('[PermissionManager] OPPO设备检测: isOppo =', isOppo, ', ColorOS =', colorOsVersion);
+      if (isOppo) {
+        // 即使 androidPermissions 为空也调用（会降级为应用详情页，但至少走原生模块）
+        await OppoPermission.openOppoPermissionSettings(androidPermissions);
+        console.log('[PermissionManager] OPPO权限跳转成功');
+        return;
+      }
+    } catch (e) {
+      console.warn('[PermissionManager] OPPO 权限跳转失败，降级为标准跳转:', e);
+    }
+  } else {
+    console.warn('[PermissionManager] OppoPermission 模块不可用，降级为标准跳转');
+  }
+
+  // 非 OPPO 设备或接口不可用时，降级为标准应用设置页
+  await Linking.openSettings();
+}
 
 // ==================== 主类实现 ====================
 
@@ -575,6 +634,7 @@ export class PermissionManager {
 
   /**
    * 打开特定设置页面
+   * 对于普通运行时权限（非特殊权限），使用 OPPO 优化跳转（带高亮定位）
    */
   async openSpecificSettings(permission: PermissionType): Promise<void> {
     switch (permission) {
@@ -606,12 +666,14 @@ export class PermissionManager {
         if (SystemSettingsModule?.openNotificationSettings) {
           await SystemSettingsModule.openNotificationSettings();
         } else {
-          await this.openAppSettings();
+          // 通知权限也尝试 OPPO 优化跳转
+          await openOppoPermissionSettingsWithFallback([permission]);
         }
         break;
 
       default:
-        await this.openAppSettings();
+        // 普通运行时权限（相机、麦克风、位置等）使用 OPPO 优化跳转
+        await openOppoPermissionSettingsWithFallback([permission]);
     }
   }
 
@@ -666,6 +728,76 @@ export class PermissionManager {
         {
           text: '前往设置',
           onPress: onOpenSettings,
+        },
+      ],
+      { cancelable: true }
+    );
+  }
+
+  /**
+   * 权限受阻时跳转到设置页（OPPO 优化版）
+   *
+   * 在 OPPO/ColorOS 14.0.1+ 设备上，直接跳转至权限管理页并高亮受阻权限；
+   * 其他设备降级为标准应用设置页。
+   *
+   * 建议在用户两次拒绝权限（PERMANENTLY_DENIED）后调用此方法替代 openAppSettings()。
+   *
+   * 高亮效果触发条件：传入的权限列表属于同一个 Android 权限组
+   * 例如同时传入 LOCATION_FINE + LOCATION_COARSE 可触发高亮（同属 LOCATION 组）
+   * 但 LOCATION_FINE + CAMERA 不会触发高亮（属于不同权限组）
+   *
+   * @param blockedPermissions 受阻的权限列表，建议只传入本次受阻的权限
+   */
+  async openBlockedPermissionSettings(
+    blockedPermissions: PermissionType | PermissionType[]
+  ): Promise<void> {
+    const permissions = Array.isArray(blockedPermissions)
+      ? blockedPermissions
+      : [blockedPermissions];
+
+    try {
+      await openOppoPermissionSettingsWithFallback(permissions);
+    } catch (error) {
+      console.error('[PermissionManager] 打开权限设置失败:', error);
+      // 最终兜底：系统设置
+      Alert.alert(
+        '无法打开设置',
+        '请手动前往系统设置 > 应用 > SceneLens > 权限 管理权限'
+      );
+    }
+  }
+
+  /**
+   * 权限受阻时显示引导弹窗（OPPO 优化版）
+   *
+   * 弹窗文案与标准 showSettingsDialog 相同，
+   * 但点击「前往设置」时使用 OPPO 优化跳转。
+   *
+   * @param permission     受阻的权限
+   * @param onCancel       用户点击取消的回调
+   */
+  showBlockedPermissionDialog(
+    permission: PermissionType,
+    onCancel?: () => void
+  ): void {
+    const title = this.getPermissionTitle(permission);
+
+    Alert.alert(
+      `需要${title}`,
+      `此功能需要${title}。您之前拒绝了该权限，请前往设置手动开启。`,
+      [
+        {
+          text: '取消',
+          style: 'cancel',
+          onPress: onCancel,
+        },
+        {
+          text: '前往设置',
+          onPress: () => {
+            this.openBlockedPermissionSettings(permission).catch(e =>
+              console.error('[PermissionManager] 跳转设置失败:', e)
+            );
+          },
         },
       ],
       { cancelable: true }

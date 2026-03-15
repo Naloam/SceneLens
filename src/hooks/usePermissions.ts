@@ -35,8 +35,10 @@ export interface UsePermissionsReturn {
   requestRequiredPermissions: () => Promise<BatchPermissionResult>;
   /** 打开应用设置 */
   openSettings: () => Promise<void>;
-  /** 打开特定权限设置 */
+  /** 打开特定权限设置（OPPO 优化跳转，带高亮定位） */
   openPermissionSettings: (permission: PermissionType) => Promise<void>;
+  /** 权限受阻时跳转到设置（OPPO 优化跳转，带高亮定位） */
+  openBlockedSettings: (permission: PermissionType | PermissionType[]) => Promise<void>;
   /** 刷新所有权限状态 */
   refreshAll: () => Promise<void>;
   /** 检查是否所有必需权限已授权 */
@@ -213,6 +215,10 @@ export function usePermissions(
     await permissionManager.openSpecificSettings(permission);
   }, []);
 
+  const openBlockedSettings = useCallback(async (permission: PermissionType | PermissionType[]) => {
+    await permissionManager.openBlockedPermissionSettings(permission);
+  }, []);
+
   const refreshAll = useCallback(async () => {
     const allPermissionTypes = Object.values(PermissionType);
     await checkPermissions(allPermissionTypes);
@@ -230,6 +236,7 @@ export function usePermissions(
     requestRequiredPermissions,
     openSettings,
     openPermissionSettings,
+    openBlockedSettings,
     refreshAll,
     allRequiredGranted,
   };

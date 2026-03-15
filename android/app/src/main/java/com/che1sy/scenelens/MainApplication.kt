@@ -17,6 +17,7 @@ import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 import com.che1sy.scenelens.SceneBridgePackage
 import com.che1sy.scenelens.modules.SystemSettingsPackage
+import com.che1sy.scenelens.modules.OppoPermissionPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -28,6 +29,7 @@ class MainApplication : Application(), ReactApplication {
               // Packages that cannot be autolinked yet can be added manually here, for example:
               add(SceneBridgePackage())
               add(SystemSettingsPackage())
+              add(OppoPermissionPackage())
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"

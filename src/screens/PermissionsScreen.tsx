@@ -85,7 +85,7 @@ export const PermissionsScreen: React.FC = () => {
     requesting,
     requestPermission,
     requestRequiredPermissions,
-    openPermissionSettings,
+    openBlockedSettings,
     refreshAll,
   } = usePermissions();
 
@@ -106,7 +106,8 @@ export const PermissionsScreen: React.FC = () => {
     const status = await requestPermission(permission);
     
     if (status === PermissionStatus.REQUIRES_SETTINGS || status === PermissionStatus.PERMANENTLY_DENIED) {
-      await openPermissionSettings(permission);
+      // 使用 OPPO 优化跳转：在 ColorOS 14.0.1+ 上直接跳转权限管理页并高亮受阻权限
+      await openBlockedSettings(permission);
     }
   };
 
