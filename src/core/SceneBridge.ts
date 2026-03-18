@@ -118,10 +118,10 @@ const fallback: SceneBridgeNativeModule = {
   async getForegroundApp() { return ''; },
   async getUsageStats() { return []; },
   async setDoNotDisturb(enabled: boolean) { return { enabled, mode: 'unknown' }; },
-  async checkDoNotDisturbPermission() { return true; },
+  async checkDoNotDisturbPermission() { return false; },
   async openDoNotDisturbSettings() { return false; },
   async setBrightness(level: number) { return { level, brightness: level }; },
-  async checkWriteSettingsPermission() { return true; },
+  async checkWriteSettingsPermission() { return false; },
   async openWriteSettingsSettings() { return false; },
   async openAppWithDeepLink(_packageName?: string, _deepLink?: string) { return false; },
   async isAppInstalled() { return false; },
@@ -134,27 +134,18 @@ const fallback: SceneBridgeNativeModule = {
   async isScreenOn() { return true; },
   async setWakeLock(enable: boolean, timeoutMs: number) { return { enabled: enable, timeout: timeoutMs }; },
   async isWakeLockEnabled() { return false; },
-  async requestPermission(permission?: string) { 
-    // 在开发模式下，允许常见权限
-    if (permission?.includes('RECORD_AUDIO')) return true;
-    return false; 
-  },
-  async checkPermission(permission?: string) { 
-    // 在开发模式下，允许常见权限
-    if (permission?.includes('RECORD_AUDIO')) return true;
-    if (permission?.includes('WAKE_LOCK')) return true;
-    return false; 
-  },
+  async requestPermission(_permission?: string) { return false; },
+  async checkPermission(_permission?: string) { return false; },
   async checkUsageStatsPermission() { return false; },
   async openUsageStatsSettings() { return false; },
-  async hasLocationPermission() { return true; },
-  async requestLocationPermission() { return true; },
-  async hasActivityRecognitionPermission() { return true; },
-  async requestActivityRecognitionPermission() { return true; },
-  async hasUsageStatsPermission() { return true; },
-  async requestUsageStatsPermission() { return true; },
-  async hasCameraPermission() { return true; },
-  async requestCameraPermission() { return true; },
+  async hasLocationPermission() { return false; },
+  async requestLocationPermission() { return false; },
+  async hasActivityRecognitionPermission() { return false; },
+  async requestActivityRecognitionPermission() { return false; },
+  async hasUsageStatsPermission() { return false; },
+  async requestUsageStatsPermission() { return false; },
+  async hasCameraPermission() { return false; },
+  async requestCameraPermission() { return false; },
   async captureImage() { 
     return { 
       base64: '', 
@@ -164,8 +155,8 @@ const fallback: SceneBridgeNativeModule = {
       timestamp: Date.now() 
     }; 
   },
-  async hasMicrophonePermission() { return true; },
-  async requestMicrophonePermission() { return true; },
+  async hasMicrophonePermission() { return false; },
+  async requestMicrophonePermission() { return false; },
   async recordAudio() { 
     return { 
       base64: '', 
@@ -175,8 +166,8 @@ const fallback: SceneBridgeNativeModule = {
       timestamp: Date.now() 
     }; 
   },
-  async enableVolumeKeyListener() { return true; },
-  async disableVolumeKeyListener() { return true; },
+  async enableVolumeKeyListener() { return false; },
+  async disableVolumeKeyListener() { return false; },
   async isVolumeKeyListenerEnabled() { return false; },
   async testVolumeKeyDoubleTap() { return false; },
   async createSceneAnalysisShortcut() { return false; },

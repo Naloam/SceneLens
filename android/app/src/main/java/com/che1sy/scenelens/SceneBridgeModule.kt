@@ -895,9 +895,22 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
           val outputStream = ByteArrayOutputStream()
           resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
           val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+
+          // Export raw RGB bytes for direct model input preprocessing in JS.
+          val pixels = IntArray(224 * 224)
+          resizedBitmap.getPixels(pixels, 0, 224, 0, 0, 224, 224)
+          val rgbBytes = ByteArray(224 * 224 * 3)
+          var rgbIndex = 0
+          for (pixel in pixels) {
+            rgbBytes[rgbIndex++] = ((pixel shr 16) and 0xFF).toByte() // R
+            rgbBytes[rgbIndex++] = ((pixel shr 8) and 0xFF).toByte()  // G
+            rgbBytes[rgbIndex++] = (pixel and 0xFF).toByte()          // B
+          }
+          val rgbBase64 = Base64.encodeToString(rgbBytes, Base64.NO_WRAP)
           
           val result = Arguments.createMap().apply {
             putString("base64", base64)
+            putString("rgbBase64", rgbBase64)
             putInt("width", 224)
             putInt("height", 224)
             putString("format", "JPEG")

@@ -25,12 +25,13 @@ import {
   Portal,
   Dialog,
   Button,
+  ActivityIndicator,
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
 import { useSettingsStore, themeColors, type ThemeColor, type NotificationStyle, type DetectionInterval } from '../stores/settingsStore';
-import { storageManager } from '../stores/storageManager';
+import { personalizationManager } from '../services/suggestion/PersonalizationManager';
 
 /**
  * 颜色选择器组件
@@ -183,12 +184,46 @@ export const SettingsScreen: React.FC = () => {
 
   const [showResetDialog, setShowResetDialog] = useState(false);
   const [showClearDialog, setShowClearDialog] = useState(false);
+  const [showClearLearningDialog, setShowClearLearningDialog] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [isClearingLearning, setIsClearingLearning] = useState(false);
+  const [onlineLearningEnabled, setOnlineLearningEnabled] = useState(true);
+  const [learningHalfLifeDays, setLearningHalfLifeDays] = useState(14);
 
   useEffect(() => {
-    loadSettings();
+    const init = async () => {
+      await loadSettings();
+      await personalizationManager.initialize();
+      const learningConfig = personalizationManager.getOnlineLearningConfig();
+      setOnlineLearningEnabled(learningConfig.enabled);
+      setLearningHalfLifeDays(learningConfig.halfLifeDays);
+    };
+    init();
   }, []);
+
+  const handleToggleOnlineLearning = async (enabled: boolean) => {
+    setOnlineLearningEnabled(enabled);
+    await personalizationManager.setOnlineLearningEnabled(enabled);
+  };
+
+  const handleHalfLifeChange = async (days: number) => {
+    setLearningHalfLifeDays(days);
+    await personalizationManager.setLearningHalfLifeDays(days);
+  };
+
+  const handleClearLearningData = async () => {
+    setIsClearingLearning(true);
+    try {
+      await personalizationManager.clearOnlineLearningData();
+      setShowClearLearningDialog(false);
+      Alert.alert('成功', '在线学习数据已清空');
+    } catch (error) {
+      Alert.alert('清空失败', `无法清空在线学习数据：${(error as Error).message}`);
+    } finally {
+      setIsClearingLearning(false);
+    }
+  };
 
   /**
    * 导出数据
@@ -290,6 +325,20 @@ export const SettingsScreen: React.FC = () => {
     { label: '10 分钟', value: 10, description: '平衡的检测频率' },
     { label: '15 分钟', value: 15, description: '较少的检测，更省电' },
   ];
+
+  const halfLifeOptions: RadioOption<number>[] = [
+    { label: '7 天', value: 7, description: '快速适应最近偏好变化' },
+    { label: '14 天', value: 14, description: '平衡稳定性与适应性' },
+    { label: '30 天', value: 30, description: '更稳定，减少短期波动影响' },
+  ];
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -454,6 +503,36 @@ export const SettingsScreen: React.FC = () => {
           value={settings.confidenceThreshold}
           onChange={setConfidenceThreshold}
         />
+
+        <Divider />
+
+        <List.Item
+          title="在线学习"
+          description="根据动作执行结果自动优化建议排序"
+          left={(props) => <List.Icon {...props} icon="brain" />}
+          right={() => (
+            <Switch
+              value={onlineLearningEnabled}
+              onValueChange={handleToggleOnlineLearning}
+            />
+          )}
+        />
+
+        {onlineLearningEnabled && (
+          <>
+            <Divider />
+            <View style={styles.sectionContent}>
+              <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
+                学习半衰期
+              </Text>
+              <RadioGroup
+                options={halfLifeOptions}
+                value={learningHalfLifeDays}
+                onChange={handleHalfLifeChange}
+              />
+            </View>
+          </>
+        )}
       </Card>
 
       {/* 数据设置 */}
@@ -476,6 +555,16 @@ export const SettingsScreen: React.FC = () => {
           left={(props) => <List.Icon {...props} icon="delete-sweep" />}
           onPress={() => setShowClearDialog(true)}
           disabled={isClearing}
+        />
+
+        <Divider />
+
+        <List.Item
+          title="清空在线学习数据"
+          description="重置动作排序学习统计"
+          left={(props) => <List.Icon {...props} icon="brain" />}
+          onPress={() => setShowClearLearningDialog(true)}
+          disabled={isClearingLearning}
         />
 
         <Divider />
@@ -562,6 +651,23 @@ export const SettingsScreen: React.FC = () => {
         </Dialog>
       </Portal>
 
+      <Portal>
+        <Dialog visible={showClearLearningDialog} onDismiss={() => setShowClearLearningDialog(false)}>
+          <Dialog.Title>清空在线学习数据</Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ color: theme.colors.onSurface }}>
+              确定要清空在线学习统计吗？清空后将恢复默认动作排序。
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setShowClearLearningDialog(false)}>取消</Button>
+            <Button onPress={handleClearLearningData} mode="contained" buttonColor="#FF3B30">
+              确认清空
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
       <View style={styles.footer}>
         <Text style={[styles.footerText, { color: theme.colors.onSurfaceVariant }]}>
           SceneLens - 智能场景感知助手
@@ -574,6 +680,10 @@ export const SettingsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   contentContainer: {
     padding: 16,

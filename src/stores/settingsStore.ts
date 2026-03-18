@@ -107,7 +107,7 @@ const SETTINGS_STORAGE_KEY = 'app_settings';
  */
 async function loadSettingsFromStorage(): Promise<AppSettings> {
   try {
-    const storedData = storageManager['storage'].getString(SETTINGS_STORAGE_KEY);
+    const storedData = storageManager.getString(SETTINGS_STORAGE_KEY);
     if (storedData) {
       const parsed = JSON.parse(storedData);
       // 合并默认设置，确保所有字段都存在
@@ -128,7 +128,7 @@ async function loadSettingsFromStorage(): Promise<AppSettings> {
 async function saveSettingsToStorage(settings: AppSettings): Promise<void> {
   try {
     const data = JSON.stringify(settings);
-    storageManager['storage'].set(SETTINGS_STORAGE_KEY, data);
+    storageManager.set(SETTINGS_STORAGE_KEY, data);
   } catch (error) {
     console.error('Failed to save settings to storage:', error);
     throw error;

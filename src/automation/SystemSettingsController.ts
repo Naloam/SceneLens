@@ -115,6 +115,7 @@ interface SystemSettingsNativeModule {
   // 权限
   checkWriteSettingsPermission(): Promise<boolean>;
   openWriteSettingsSettings(): Promise<boolean>;
+  openNotificationSettings(): Promise<boolean>;
   checkBluetoothPermission(): Promise<boolean>;
   requestBluetoothPermission(): Promise<boolean>;
   
@@ -125,6 +126,12 @@ interface SystemSettingsNativeModule {
 
 const { SystemSettings } = NativeModules;
 const isNativeModuleAvailable = !!SystemSettings;
+
+function normalizePercentageLevel(level: number): number {
+  const numericLevel = Number.isFinite(level) ? level : 0;
+  const normalizedLevel = Math.abs(numericLevel) <= 1 ? numericLevel * 100 : numericLevel;
+  return Math.max(0, Math.min(100, Math.round(normalizedLevel)));
+}
 
 // ==================== Fallback 实现 ====================
 
@@ -142,6 +149,7 @@ const fallbackModule: SystemSettingsNativeModule = {
       ring: { level: 100, current: 15, max: 15 },
       notification: { level: 100, current: 15, max: 15 },
       alarm: { level: 100, current: 15, max: 15 },
+      system: { level: 50, current: 8, max: 15 },
     };
   },
   async setBrightness(level: number, autoMode: boolean) {
@@ -197,6 +205,9 @@ const fallbackModule: SystemSettingsNativeModule = {
   async openWriteSettingsSettings() {
     return false;
   },
+  async openNotificationSettings() {
+    return false;
+  },
   async checkBluetoothPermission() {
     return false;
   },
@@ -209,7 +220,7 @@ const fallbackModule: SystemSettingsNativeModule = {
   },
   async getSystemState() {
     return {
-      volume: { media: 50, ring: 100, notification: 100, alarm: 100 },
+      volume: { media: 50, ring: 100, notification: 100, alarm: 100, system: 50 },
       brightness: { level: 50, autoMode: false },
       doNotDisturb: { enabled: false, mode: 'all' as DoNotDisturbMode },
       wifi: { enabled: false },
@@ -281,7 +292,7 @@ export async function getAllVolumes(): Promise<VolumeSettings> {
     };
   } catch (error) {
     console.error('[SystemSettings] Failed to get all volumes:', error);
-    return { media: 50, ring: 100, notification: 100, alarm: 100 };
+    return { media: 50, ring: 100, notification: 100, alarm: 100, system: 50 };
   }
 }
 
@@ -317,7 +328,7 @@ export async function setVolumes(settings: VolumeSettings): Promise<boolean> {
  */
 export async function setBrightness(level: number, autoMode: boolean = false): Promise<boolean> {
   try {
-    const result = await nativeModule.setBrightness(Math.round(level), autoMode);
+    const result = await nativeModule.setBrightness(normalizePercentageLevel(level), autoMode);
     return result.success;
   } catch (error) {
     console.error('[SystemSettings] Failed to set brightness:', error);
@@ -571,6 +582,15 @@ export async function openWriteSettingsSettings(): Promise<boolean> {
   }
 }
 
+export async function openNotificationSettings(): Promise<boolean> {
+  try {
+    return await nativeModule.openNotificationSettings();
+  } catch (error) {
+    console.error('[SystemSettings] Failed to open notification settings:', error);
+    return false;
+  }
+}
+
 // ==================== 批量操作 ====================
 
 /**
@@ -612,7 +632,7 @@ export async function applySceneSettings(
       nativeSettings.volume = mergedSettings.volume;
     }
     if (mergedSettings.brightness !== undefined) {
-      nativeSettings.brightness = mergedSettings.brightness;
+      nativeSettings.brightness = normalizePercentageLevel(mergedSettings.brightness);
     }
     if (mergedSettings.autoBrightness !== undefined) {
       nativeSettings.autoBrightness = mergedSettings.autoBrightness;
@@ -639,6 +659,8 @@ export async function applySceneSettings(
       result.results.bluetooth = btResult.success;
       if (!btResult.success) result.hasErrors = true;
     }
+
+    result.success = result.success && !result.hasErrors;
     
     console.log(`[SystemSettings] Applied ${sceneType} scene settings:`, result);
     return result;
@@ -704,6 +726,7 @@ export const SystemSettingsController = {
   // 权限
   checkWriteSettingsPermission,
   openWriteSettingsSettings,
+  openNotificationSettings,
   
   // 批量操作
   getSystemState,

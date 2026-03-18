@@ -38,7 +38,7 @@ export interface SceneSuggestionCardProps {
   /** 是否显示详细信息（默认展开） */
   expanded?: boolean;
   /** 执行完成回调 */
-  onExecutionComplete?: (result: SuggestionExecutionResult) => void;
+  onExecutionComplete?: (result: SuggestionExecutionResult, actionKind: OneTapAction['action']) => void;
   /** 样式 */
   style?: any;
   /** 是否隐藏检测要点 */
@@ -122,7 +122,7 @@ export const SceneSuggestionCard: React.FC<SceneSuggestionCardProps> = ({
       }
 
       // 触发回调
-      onExecutionComplete?.(result);
+      onExecutionComplete?.(result, action.action);
     } catch (error) {
       console.error('[SceneSuggestionCard] 执行失败:', error);
     } finally {

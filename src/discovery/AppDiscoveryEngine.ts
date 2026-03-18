@@ -148,6 +148,7 @@ export class AppDiscoveryEngine {
 
     // 交通出行 - 扩展关键词
     if (
+      packageName.includes('alipay') ||
       packageName.includes('metro') ||
       packageName.includes('transit') ||
       packageName.includes('subway') ||
@@ -363,6 +364,15 @@ export class AppDiscoveryEngine {
       statsMap.set(stat.packageName, stat);
     }
 
+    const maxForegroundTime = usageStats.reduce(
+      (max, stat) => Math.max(max, stat.totalTimeInForeground),
+      0
+    );
+    const maxLaunchCount = usageStats.reduce(
+      (max, stat) => Math.max(max, stat.launchCount ?? 0),
+      0
+    );
+
     // 计算每个应用的得分
     const appsWithScore = apps.map(app => {
       const stats = statsMap.get(app.packageName);
@@ -372,9 +382,11 @@ export class AppDiscoveryEngine {
 
       // 综合考虑使用时长和启动次数
       // 使用时长权重 0.6，启动次数权重 0.4
-      const timeScore = stats.totalTimeInForeground / (1000 * 60 * 60); // 转换为小时
-      const launchScore = stats.launchCount ?? 0;
-      const score = timeScore * 0.6 + launchScore * 0.4;
+      const normalizedTimeScore =
+        maxForegroundTime > 0 ? stats.totalTimeInForeground / maxForegroundTime : 0;
+      const normalizedLaunchScore =
+        maxLaunchCount > 0 ? (stats.launchCount ?? 0) / maxLaunchCount : 0;
+      const score = normalizedTimeScore * 0.7 + normalizedLaunchScore * 0.3;
 
       return { app, score };
     });

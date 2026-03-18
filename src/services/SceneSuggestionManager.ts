@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SceneSuggestionManager - 场景执行建议包管理器
  *
  * 负责加载和管理场景执行建议包配置，为 UI 层提供场景建议数据，
@@ -21,6 +21,10 @@ import { SceneLensError, ErrorCode } from '../types';
 import { sceneExecutor } from '../executors/SceneExecutor';
 import { appDiscoveryEngine } from '../discovery';
 import SceneBridge from '../core/SceneBridge';
+import { SystemSettingsController } from '../automation/SystemSettingsController';
+import { resolveDoNotDisturbSettings } from '../automation/systemSettingTransforms';
+import type { VolumeStreamType } from '../types/automation';
+import { storageManager } from '../stores/storageManager';
 import { 
   dynamicSuggestionService, 
   DynamicSuggestionPackage,
@@ -29,6 +33,24 @@ import {
 
 // 应用名称（用于权限提示）
 const APP_NAME = 'SceneLens';
+const RESPONSE_HISTORY_KEY = 'scene_suggestion_response_history';
+const MAX_RESPONSE_HISTORY = 500;
+
+function resolveVolumeParams(
+  params: Record<string, any> | undefined
+): { streamType: VolumeStreamType; levelPercent: number } {
+  const rawLevel = typeof params?.level === 'number' ? params.level : 50;
+  const levelPercent = rawLevel <= 1 ? Math.round(rawLevel * 100) : Math.round(rawLevel);
+  const rawStream = typeof params?.streamType === 'string' ? params.streamType.toLowerCase() : 'media';
+  const streamType: VolumeStreamType = ['media', 'ring', 'notification', 'alarm', 'system'].includes(rawStream)
+    ? (rawStream as VolumeStreamType)
+    : 'media';
+
+  return {
+    streamType,
+    levelPercent: Math.max(0, Math.min(100, levelPercent)),
+  };
+}
 
 /**
  * 建议包加载选项
@@ -94,10 +116,19 @@ interface PermissionStatus {
   hasCalendarPermission: boolean;
 }
 
+interface ExecutedActionResult {
+  type: 'system' | 'app';
+  description: string;
+  success: boolean;
+  error?: string;
+  usedFallback?: boolean;
+}
+
 class SceneSuggestionManagerClass {
   private config: SceneSuggestionsConfig | null = null;
   private isLoaded = false;
   private loadingPromise: Promise<SceneSuggestionsConfig> | null = null;
+  private initializationPromise: Promise<void> | null = null;
   /** 动态建议缓存 */
   private dynamicSuggestionCache: Map<SceneType, {
     suggestion: DynamicSuggestionPackage;
@@ -113,9 +144,24 @@ class SceneSuggestionManagerClass {
     if (this.isLoaded) {
       return;
     }
+
+    if (this.initializationPromise) {
+      await this.initializationPromise;
+      return;
+    }
+
+    this.initializationPromise = this.performInitialize();
+
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
+    }
+  }
+
+  private async performInitialize(): Promise<void> {
     await this.loadConfig();
     await sceneExecutor.initialize();
-    // 初始化动态建议服务
     await dynamicSuggestionService.initialize();
   }
 
@@ -415,8 +461,6 @@ class SceneSuggestionManagerClass {
     actionId: string,
     options: ExecuteOptions = {}
   ): Promise<SuggestionExecutionResult> {
-    const startTime = Date.now();
-
     try {
       // 获取场景配置
       const scene = await this.getSuggestionBySceneType(sceneType, {
@@ -433,33 +477,23 @@ class SceneSuggestionManagerClass {
         );
       }
 
-      // 查找对应的操作
-      let action = scene.oneTapActions.find(a => a.id === actionId);
-      
-      // 如果找不到指定的 action，尝试以下降级方案：
-      // 1. 查找 action 为 'execute_all' 的操作
-      // 2. 查找第一个 type 为 'primary' 的操作
-      // 3. 创建一个虚拟的 execute_all 操作
+      // Only execute the explicit one-tap action the UI selected.
+      const action = scene.oneTapActions.find(a => a.id === actionId);
       if (!action) {
-        action = scene.oneTapActions.find(a => a.action === 'execute_all');
-      }
-      if (!action) {
-        action = scene.oneTapActions.find(a => a.type === 'primary');
-      }
-      if (!action) {
-        // 创建一个虚拟的 execute_all 操作
-        console.log(`[SceneSuggestionManager] 未找到操作 ${actionId}，使用虚拟 execute_all 操作`);
-        action = {
-          id: 'auto_execute_all',
-          label: '执行建议',
-          description: '执行所有系统调整和应用启动',
-          type: 'primary',
-          action: 'execute_all',
-        };
+        throw new SceneLensError(
+          ErrorCode.APP_NOT_FOUND,
+          `Action not found: ${actionId}`,
+          true
+        );
       }
 
-      // 处理不同的操作类型
       const result = await this.executeAction(scene, action, options);
+      await this.recordResponse({
+        sceneId: sceneType,
+        actionId: action.id,
+        actionType: action.action as OneTapActionKind,
+        timestamp: Date.now(),
+      });
 
       return {
         sceneId: sceneType,
@@ -491,23 +525,14 @@ class SceneSuggestionManagerClass {
     options: ExecuteOptions
   ): Promise<{
     success: boolean;
-    executedActions: Array<{
-      type: 'system' | 'app';
-      description: string;
-      success: boolean;
-      error?: string;
-    }>;
+    executedActions: ExecutedActionResult[];
     skippedActions: string[];
     fallbackApplied: boolean;
   }> {
-    const executedActions: Array<{
-      type: 'system' | 'app';
-      description: string;
-      success: boolean;
-      error?: string;
-    }> = [];
+    const executedActions: ExecutedActionResult[] = [];
     const skippedActions: string[] = [];
     let fallbackApplied = false;
+    const allowFallback = options.autoFallback === true;
 
     // 检查权限状态
     const permissionStatus = await this.checkPermissions();
@@ -519,16 +544,34 @@ class SceneSuggestionManagerClass {
         for (const adjustment of scene.systemAdjustments) {
           const result = await this.executeSystemAdjustment(adjustment, permissionStatus);
           executedActions.push(result);
-          if (!result.success && options.autoFallback) {
+          if (!result.success) {
+            if (!allowFallback) {
+              return {
+                success: false,
+                executedActions,
+                skippedActions,
+                fallbackApplied,
+              };
+            }
+
             fallbackApplied = true;
           }
         }
 
         for (const appLaunch of scene.appLaunches) {
-          const result = await this.executeAppLaunch(appLaunch);
+          const result = await this.executeAppLaunch(appLaunch, allowFallback);
           executedActions.push(result);
-          if (!result.success && options.autoFallback) {
+          if (result.usedFallback) {
             fallbackApplied = true;
+          }
+
+          if (!result.success && !allowFallback) {
+            return {
+              success: false,
+              executedActions,
+              skippedActions,
+              fallbackApplied,
+            };
           }
         }
         break;
@@ -569,6 +612,36 @@ class SceneSuggestionManagerClass {
     try {
       // 记录执行信息
       console.log(`[SceneSuggestionManager] 执行系统调整: ${adjustment.action} - ${adjustment.label}`);
+
+      if (adjustment.action === 'setDoNotDisturb' && !permissionStatus.hasDoNotDisturbPermission) {
+        return {
+          type: 'system',
+          description: adjustment.label,
+          success: false,
+          error: 'Do Not Disturb permission not granted',
+        };
+      }
+
+      if (
+        (adjustment.action === 'setBrightness' || adjustment.action === 'setVolume') &&
+        !permissionStatus.hasWriteSettingsPermission
+      ) {
+        return {
+          type: 'system',
+          description: adjustment.label,
+          success: false,
+          error: 'Write settings permission not granted',
+        };
+      }
+
+      if (adjustment.action === 'setWakeLock' && !permissionStatus.hasWakeLockPermission) {
+        return {
+          type: 'system',
+          description: adjustment.label,
+          success: false,
+          error: 'Wake lock permission not granted',
+        };
+      }
       
       let result: any = null;
       let error: string | null = null;
@@ -576,25 +649,37 @@ class SceneSuggestionManagerClass {
       // 尝试执行系统操作
       try {
         switch (adjustment.action) {
-          case 'setDoNotDisturb':
-            result = await SceneBridge.setDoNotDisturb(adjustment.params?.enable ?? false);
-            console.log(`[SceneSuggestionManager] ✓ 勿扰模式已${adjustment.params?.enable ? '开启' : '关闭'}`);
+          case 'setDoNotDisturb': {
+            const { enabled, mode } = resolveDoNotDisturbSettings(adjustment.params);
+            const success = await SystemSettingsController.setDoNotDisturb(enabled, mode);
+            if (!success) {
+              throw new Error(`勿扰模式设置失败: enabled=${enabled}, mode=${mode}`);
+            }
+            result = { enabled, mode };
+            console.log(`[SceneSuggestionManager] ✓ 勿扰模式已${enabled ? '开启' : '关闭'} (${mode})`);
             
             // 如果权限不足，记录警告信息
             if (!permissionStatus.hasDoNotDisturbPermission) {
               console.warn(`[SceneSuggestionManager] ⚠ 勿扰模式权限不足，但已尝试执行。用户需要在系统设置中授予权限。`);
             }
             break;
+          }
 
-          case 'setBrightness':
-            result = await SceneBridge.setBrightness(adjustment.params?.level ?? 0.5);
-            console.log(`[SceneSuggestionManager] ✓ 亮度已调整为 ${adjustment.params?.level ?? 0.5}`);
+          case 'setBrightness': {
+            const level = adjustment.params?.level ?? 0.5;
+            const success = await SystemSettingsController.setBrightness(level);
+            if (!success) {
+              throw new Error(`亮度设置失败: ${level}`);
+            }
+            result = { level };
+            console.log(`[SceneSuggestionManager] ✓ 亮度已调整为 ${level}`);
             
             // 如果权限不足，记录警告信息
             if (!permissionStatus.hasWriteSettingsPermission) {
               console.warn(`[SceneSuggestionManager] ⚠ 系统设置权限不足，但已尝试执行。用户需要在系统设置中授予权限。`);
             }
             break;
+          }
 
           case 'setWakeLock':
             result = await SceneBridge.setWakeLock(
@@ -605,7 +690,14 @@ class SceneSuggestionManagerClass {
             break;
 
           case 'setVolume':
-            console.log(`[SceneSuggestionManager] ✓ 音量调整请求: ${adjustment.params?.level ?? 0.5}`);
+            {
+              const { streamType, levelPercent } = resolveVolumeParams(adjustment.params);
+              const success = await SystemSettingsController.setVolume(streamType, levelPercent);
+              if (!success) {
+                throw new Error(`音量设置失败: ${streamType}=${levelPercent}%`);
+              }
+              console.log(`[SceneSuggestionManager] ✓ 音量已设置: ${streamType}=${levelPercent}%`);
+            }
             break;
 
           default:
@@ -624,22 +716,23 @@ class SceneSuggestionManagerClass {
           console.warn(`[SceneSuggestionManager] 这是勿扰模式权限问题。用户需要在"系统设置 > 应用 > ${APP_NAME} > 通知权限"中授予权限`);
         }
         
-        console.warn(`[SceneSuggestionManager] 继续使用降级方案标记成功`);
+        console.warn('[SceneSuggestionManager] 系统调整执行失败');
       }
 
-      // 总是返回成功，因为我们已经尝试执行了
+      const success = !error;
       return {
         type: 'system',
         description: adjustment.label,
-        success: true,
+        success,
+        error: error ?? undefined,
       };
     } catch (error) {
       console.error(`[SceneSuggestionManager] ✗ 系统调整异常: ${adjustment.action}`, error);
-      // 即使异常也返回成功，使用降级方案
       return {
         type: 'system',
         description: adjustment.label,
-        success: true,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }
@@ -648,13 +741,9 @@ class SceneSuggestionManagerClass {
    * 执行应用启动
    */
   private async executeAppLaunch(
-    appLaunch: AppLaunch
-  ): Promise<{
-    type: 'app';
-    description: string;
-    success: boolean;
-    error?: string;
-  }> {
+    appLaunch: AppLaunch,
+    allowFallback: boolean
+  ): Promise<ExecutedActionResult> {
     try {
       // 解析意图为包名
       const packageName = appLaunch.intent
@@ -662,24 +751,22 @@ class SceneSuggestionManagerClass {
         : undefined;
 
       if (!packageName) {
-        // 在开发环境下，标记为成功但添加提示
-        console.log(`[SceneSuggestionManager] 无法解析应用包名: ${appLaunch.intent}，开发模式下跳过`);
         return {
           type: 'app',
-          description: `${appLaunch.label}（模拟执行）`,
-          success: true,
+          description: appLaunch.label,
+          success: false,
+          error: `Unable to resolve package name: ${appLaunch.intent ?? 'unknown'}`,
         };
       }
 
       // 检查应用是否已安装
       const isInstalled = await SceneBridge.isAppInstalled(packageName);
       if (!isInstalled) {
-        // 在开发/模拟环境下，也标记为成功
-        console.log(`[SceneSuggestionManager] 应用未安装: ${packageName}，开发模式下跳过`);
         return {
           type: 'app',
-          description: `${appLaunch.label}（未安装）`,
-          success: true,
+          description: appLaunch.label,
+          success: false,
+          error: `App not installed: ${packageName}`,
         };
       }
 
@@ -695,30 +782,39 @@ class SceneSuggestionManagerClass {
         };
       }
 
-      // 尝试降级：打开应用首页
+      // Deep-link fallback should be opt-in only.
+      if (!allowFallback) {
+        return {
+          type: 'app',
+          description: appLaunch.label,
+          success: false,
+          error: `Unable to open app deep link: ${packageName}`,
+        };
+      }
+
       const fallbackSuccess = await SceneBridge.openAppWithDeepLink(packageName);
       if (fallbackSuccess) {
         return {
           type: 'app',
           description: `${appLaunch.label}（降级：${appLaunch.fallbackAction}）`,
           success: true,
+          usedFallback: true,
         };
       }
 
-      // 即使打开失败，在开发环境下也标记为成功
-      console.log(`[SceneSuggestionManager] 无法打开应用: ${packageName}，开发模式下标记成功`);
       return {
         type: 'app',
-        description: `${appLaunch.label}（模拟执行）`,
-        success: true,
+        description: appLaunch.label,
+        success: false,
+        error: `Unable to open app: ${packageName}`,
       };
     } catch (error) {
-      // 在开发模式下，即使出错也标记为成功
       console.warn(`[SceneSuggestionManager] 应用启动异常:`, error);
       return {
         type: 'app',
-        description: `${appLaunch.label}（模拟执行）`,
-        success: true,
+        description: appLaunch.label,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }
@@ -817,9 +913,18 @@ class SceneSuggestionManagerClass {
    * 记录用户响应
    */
   async recordResponse(response: SuggestionResponse): Promise<void> {
-    // 这里可以集成到用户反馈系统
     console.log('[SceneSuggestionManager] 记录用户响应:', response);
-    // TODO: 保存到持久存储
+    try {
+      const existing = storageManager.getString(RESPONSE_HISTORY_KEY);
+      const history: SuggestionResponse[] = existing ? JSON.parse(existing) : [];
+      history.push(response);
+      storageManager.set(
+        RESPONSE_HISTORY_KEY,
+        JSON.stringify(history.slice(-MAX_RESPONSE_HISTORY))
+      );
+    } catch (error) {
+      console.warn('[SceneSuggestionManager] 保存用户响应失败:', error);
+    }
   }
 
   /**

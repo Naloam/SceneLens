@@ -24,7 +24,8 @@ describe('ModelRunner', () => {
       const mockImageData: ImageData = {
         uri: 'file://test-image.jpg',
         width: 640,
-        height: 480
+        height: 480,
+        rgbBase64: 'AAECAwQFBgcICQ==',
       };
 
       const predictions = await modelRunner.runImageClassification(mockImageData);
@@ -48,7 +49,8 @@ describe('ModelRunner', () => {
       const mockImageData: ImageData = {
         uri: 'file://test-image.jpg',
         width: 640,
-        height: 480
+        height: 480,
+        rgbBase64: 'AAECAwQFBgcICQ==',
       };
 
       const predictions = await modelRunner.runImageClassification(mockImageData);
@@ -96,7 +98,8 @@ describe('ModelRunner', () => {
       const mockImageData: ImageData = {
         uri: 'file://test-image.jpg',
         width: 640,
-        height: 480
+        height: 480,
+        rgbBase64: 'AAECAwQFBgcICQ==',
       };
 
       const allPredictions = await modelRunner.runImageClassification(mockImageData);

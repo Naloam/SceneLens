@@ -11,6 +11,14 @@
 
 import { Platform, Linking, Alert, NativeModules, PermissionsAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { sceneBridge } from '../core/SceneBridge';
+import {
+  checkDoNotDisturbPermission,
+  checkWriteSettingsPermission,
+  openDoNotDisturbSettings,
+  openNotificationSettings,
+  openWriteSettingsSettings,
+} from '../automation/SystemSettingsController';
 
 // ==================== 类型定义 ====================
 
@@ -102,24 +110,68 @@ export interface BatchPermissionResult {
 const STORAGE_KEY_DENIED = '@scenelens/permissions_denied';
 const STORAGE_KEY_REQUEST_COUNT = '@scenelens/permissions_request_count';
 
+const ANDROID_PERMISSIONS = PermissionsAndroid?.PERMISSIONS ?? {
+  ACCESS_FINE_LOCATION: 'android.permission.ACCESS_FINE_LOCATION',
+  ACCESS_COARSE_LOCATION: 'android.permission.ACCESS_COARSE_LOCATION',
+  READ_CALENDAR: 'android.permission.READ_CALENDAR',
+  WRITE_CALENDAR: 'android.permission.WRITE_CALENDAR',
+  POST_NOTIFICATIONS: 'android.permission.POST_NOTIFICATIONS',
+  RECORD_AUDIO: 'android.permission.RECORD_AUDIO',
+  CAMERA: 'android.permission.CAMERA',
+  READ_EXTERNAL_STORAGE: 'android.permission.READ_EXTERNAL_STORAGE',
+  WRITE_EXTERNAL_STORAGE: 'android.permission.WRITE_EXTERNAL_STORAGE',
+};
+
+const ANDROID_PERMISSION_RESULTS = PermissionsAndroid?.RESULTS ?? {
+  GRANTED: 'granted',
+  DENIED: 'denied',
+  NEVER_ASK_AGAIN: 'never_ask_again',
+};
+
+const ANDROID_13_API_LEVEL = 33;
+
+export function getAndroidApiLevel(
+  platformLike: { Version?: unknown } = Platform
+): number | null {
+  const version = platformLike?.Version;
+
+  if (typeof version === 'number') {
+    return version;
+  }
+
+  if (typeof version === 'string') {
+    const parsed = Number.parseInt(version, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+
+  return null;
+}
+
+export function requiresNotificationRuntimePermission(
+  platformLike: { Version?: unknown } = Platform
+): boolean {
+  const apiLevel = getAndroidApiLevel(platformLike);
+  return apiLevel === null || apiLevel >= ANDROID_13_API_LEVEL;
+}
+
 /**
  * 权限到 Android 权限字符串的映射
  */
 const PERMISSION_ANDROID_MAP: Record<PermissionType, string | null> = {
-  [PermissionType.LOCATION_FINE]: PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-  [PermissionType.LOCATION_COARSE]: PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+  [PermissionType.LOCATION_FINE]: ANDROID_PERMISSIONS.ACCESS_FINE_LOCATION,
+  [PermissionType.LOCATION_COARSE]: ANDROID_PERMISSIONS.ACCESS_COARSE_LOCATION,
   [PermissionType.LOCATION_BACKGROUND]: 'android.permission.ACCESS_BACKGROUND_LOCATION',
-  [PermissionType.CALENDAR_READ]: PermissionsAndroid.PERMISSIONS.READ_CALENDAR,
-  [PermissionType.CALENDAR_WRITE]: PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR,
+  [PermissionType.CALENDAR_READ]: ANDROID_PERMISSIONS.READ_CALENDAR,
+  [PermissionType.CALENDAR_WRITE]: ANDROID_PERMISSIONS.WRITE_CALENDAR,
   [PermissionType.ACTIVITY_RECOGNITION]: 'android.permission.ACTIVITY_RECOGNITION',
   [PermissionType.WRITE_SETTINGS]: null, // 特殊权限，需要跳转设置
   [PermissionType.NOTIFICATION_POLICY]: null, // 特殊权限，需要跳转设置
   [PermissionType.USAGE_STATS]: null, // 特殊权限，需要跳转设置
-  [PermissionType.NOTIFICATIONS]: PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-  [PermissionType.MICROPHONE]: PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-  [PermissionType.CAMERA]: PermissionsAndroid.PERMISSIONS.CAMERA,
-  [PermissionType.STORAGE_READ]: PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
-  [PermissionType.STORAGE_WRITE]: PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+  [PermissionType.NOTIFICATIONS]: ANDROID_PERMISSIONS.POST_NOTIFICATIONS,
+  [PermissionType.MICROPHONE]: ANDROID_PERMISSIONS.RECORD_AUDIO,
+  [PermissionType.CAMERA]: ANDROID_PERMISSIONS.CAMERA,
+  [PermissionType.STORAGE_READ]: ANDROID_PERMISSIONS.READ_EXTERNAL_STORAGE,
+  [PermissionType.STORAGE_WRITE]: ANDROID_PERMISSIONS.WRITE_EXTERNAL_STORAGE,
 };
 
 /**
@@ -187,7 +239,50 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
 
 // ==================== Native Module 接口 ====================
 
-const { SystemSettingsModule } = NativeModules;
+function getOppoPermissionModule() {
+  return NativeModules?.OppoPermission;
+}
+
+const PERMISSION_TO_ANDROID_STRING: Partial<Record<PermissionType, string>> = {
+  [PermissionType.LOCATION_FINE]: 'android.permission.ACCESS_FINE_LOCATION',
+  [PermissionType.LOCATION_COARSE]: 'android.permission.ACCESS_COARSE_LOCATION',
+  [PermissionType.LOCATION_BACKGROUND]: 'android.permission.ACCESS_BACKGROUND_LOCATION',
+  [PermissionType.CALENDAR_READ]: 'android.permission.READ_CALENDAR',
+  [PermissionType.CALENDAR_WRITE]: 'android.permission.WRITE_CALENDAR',
+  [PermissionType.ACTIVITY_RECOGNITION]: 'android.permission.ACTIVITY_RECOGNITION',
+  [PermissionType.NOTIFICATIONS]: 'android.permission.POST_NOTIFICATIONS',
+  [PermissionType.MICROPHONE]: 'android.permission.RECORD_AUDIO',
+  [PermissionType.CAMERA]: 'android.permission.CAMERA',
+  [PermissionType.STORAGE_READ]: 'android.permission.READ_EXTERNAL_STORAGE',
+  [PermissionType.STORAGE_WRITE]: 'android.permission.WRITE_EXTERNAL_STORAGE',
+};
+
+async function openOppoPermissionSettingsWithFallback(
+  blockedPermissions: PermissionType[]
+): Promise<void> {
+  const androidPermissions = blockedPermissions
+    .map(permission => PERMISSION_TO_ANDROID_STRING[permission])
+    .filter((value): value is string => !!value);
+
+  if (
+    getOppoPermissionModule() &&
+    typeof getOppoPermissionModule()?.isOppoDevice === 'function' &&
+    typeof getOppoPermissionModule()?.openOppoPermissionSettings === 'function'
+  ) {
+    try {
+      const oppoPermission = getOppoPermissionModule();
+      const isOppoDevice = await oppoPermission.isOppoDevice();
+      if (isOppoDevice) {
+        await oppoPermission.openOppoPermissionSettings(androidPermissions);
+        return;
+      }
+    } catch (error) {
+      console.warn('[PermissionManager] OPPO permission settings fallback triggered:', error);
+    }
+  }
+
+  await Linking.openSettings();
+}
 
 // ==================== 主类实现 ====================
 
@@ -248,7 +343,7 @@ export class PermissionManager {
    * 检查单个权限状态
    */
   async checkPermission(permission: PermissionType): Promise<PermissionCheckResult> {
-    if (Platform.OS !== 'android') {
+    if (Platform?.OS && Platform.OS !== 'android') {
       return {
         permission,
         status: PermissionStatus.UNAVAILABLE,
@@ -257,6 +352,17 @@ export class PermissionManager {
     }
 
     await this.initialize();
+
+    if (
+      permission === PermissionType.NOTIFICATIONS &&
+      !requiresNotificationRuntimePermission()
+    ) {
+      return {
+        permission,
+        status: PermissionStatus.GRANTED,
+        canRequest: false,
+      };
+    }
 
     // 检查是否是特殊权限
     if (SPECIAL_PERMISSIONS.includes(permission)) {
@@ -275,6 +381,14 @@ export class PermissionManager {
     // 检查普通权限
     const androidPermission = PERMISSION_ANDROID_MAP[permission];
     if (!androidPermission) {
+      return {
+        permission,
+        status: PermissionStatus.UNAVAILABLE,
+        canRequest: false,
+      };
+    }
+
+    if (typeof PermissionsAndroid?.check !== 'function') {
       return {
         permission,
         status: PermissionStatus.UNAVAILABLE,
@@ -308,21 +422,15 @@ export class PermissionManager {
 
       switch (permission) {
         case PermissionType.WRITE_SETTINGS:
-          if (SystemSettingsModule?.canWriteSettings) {
-            granted = await SystemSettingsModule.canWriteSettings();
-          }
+          granted = await checkWriteSettingsPermission();
           break;
 
         case PermissionType.NOTIFICATION_POLICY:
-          if (SystemSettingsModule?.isNotificationPolicyAccessGranted) {
-            granted = await SystemSettingsModule.isNotificationPolicyAccessGranted();
-          }
+          granted = await checkDoNotDisturbPermission();
           break;
 
         case PermissionType.USAGE_STATS:
-          if (SystemSettingsModule?.hasUsageStatsPermission) {
-            granted = await SystemSettingsModule.hasUsageStatsPermission();
-          }
+          granted = await sceneBridge.hasUsageStatsPermission();
           break;
       }
 
@@ -345,11 +453,18 @@ export class PermissionManager {
    * 请求单个权限
    */
   async requestPermission(permission: PermissionType): Promise<PermissionStatus> {
-    if (Platform.OS !== 'android') {
+    if (Platform?.OS && Platform.OS !== 'android') {
       return PermissionStatus.UNAVAILABLE;
     }
 
     await this.initialize();
+
+    if (
+      permission === PermissionType.NOTIFICATIONS &&
+      !requiresNotificationRuntimePermission()
+    ) {
+      return PermissionStatus.GRANTED;
+    }
 
     // 特殊权限需要跳转设置
     if (SPECIAL_PERMISSIONS.includes(permission)) {
@@ -363,6 +478,10 @@ export class PermissionManager {
 
     const androidPermission = PERMISSION_ANDROID_MAP[permission];
     if (!androidPermission) {
+      return PermissionStatus.UNAVAILABLE;
+    }
+
+    if (typeof PermissionsAndroid?.request !== 'function') {
       return PermissionStatus.UNAVAILABLE;
     }
 
@@ -381,11 +500,11 @@ export class PermissionManager {
 
       let status: PermissionStatus;
 
-      if (result === PermissionsAndroid.RESULTS.GRANTED) {
+      if (result === ANDROID_PERMISSION_RESULTS.GRANTED) {
         status = PermissionStatus.GRANTED;
         // 如果之前被标记为永久拒绝，移除标记
         this.permanentlyDenied.delete(permission);
-      } else if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+      } else if (result === ANDROID_PERMISSION_RESULTS.NEVER_ASK_AGAIN) {
         status = PermissionStatus.PERMANENTLY_DENIED;
         this.permanentlyDenied.add(permission);
       } else {
@@ -412,25 +531,19 @@ export class PermissionManager {
     try {
       switch (permission) {
         case PermissionType.WRITE_SETTINGS:
-          if (SystemSettingsModule?.openWriteSettings) {
-            await SystemSettingsModule.openWriteSettings();
-          } else {
+          if (!(await openWriteSettingsSettings())) {
             await Linking.openSettings();
           }
           break;
 
         case PermissionType.NOTIFICATION_POLICY:
-          if (SystemSettingsModule?.openNotificationPolicySettings) {
-            await SystemSettingsModule.openNotificationPolicySettings();
-          } else {
+          if (!(await openDoNotDisturbSettings())) {
             await Linking.openSettings();
           }
           break;
 
         case PermissionType.USAGE_STATS:
-          if (SystemSettingsModule?.openUsageAccessSettings) {
-            await SystemSettingsModule.openUsageAccessSettings();
-          } else {
+          if (!(await sceneBridge.openUsageStatsSettings())) {
             await Linking.openSettings();
           }
           break;
@@ -579,39 +692,31 @@ export class PermissionManager {
   async openSpecificSettings(permission: PermissionType): Promise<void> {
     switch (permission) {
       case PermissionType.WRITE_SETTINGS:
-        if (SystemSettingsModule?.openWriteSettings) {
-          await SystemSettingsModule.openWriteSettings();
-        } else {
+        if (!(await openWriteSettingsSettings())) {
           await this.openAppSettings();
         }
         break;
 
       case PermissionType.NOTIFICATION_POLICY:
-        if (SystemSettingsModule?.openNotificationPolicySettings) {
-          await SystemSettingsModule.openNotificationPolicySettings();
-        } else {
+        if (!(await openDoNotDisturbSettings())) {
           await this.openAppSettings();
         }
         break;
 
       case PermissionType.USAGE_STATS:
-        if (SystemSettingsModule?.openUsageAccessSettings) {
-          await SystemSettingsModule.openUsageAccessSettings();
-        } else {
+        if (!(await sceneBridge.openUsageStatsSettings())) {
           await this.openAppSettings();
         }
         break;
 
       case PermissionType.NOTIFICATIONS:
-        if (SystemSettingsModule?.openNotificationSettings) {
-          await SystemSettingsModule.openNotificationSettings();
-        } else {
-          await this.openAppSettings();
+        if (!(await openNotificationSettings())) {
+          await openOppoPermissionSettingsWithFallback([permission]);
         }
         break;
 
       default:
-        await this.openAppSettings();
+        await openOppoPermissionSettingsWithFallback([permission]);
     }
   }
 

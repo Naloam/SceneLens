@@ -19,71 +19,22 @@ import {
 } from '../types';
 import { feedbackLogger } from '../reflection/FeedbackLogger';
 import { weightAdjuster } from '../reflection/WeightAdjuster';
+import { storageManager } from '../stores/storageManager';
+
+const LEGACY_TRIGGER_HISTORY_STORAGE_KEY = StorageKeys.USER_FEEDBACK;
+const TRIGGER_HISTORY_STORAGE_KEY = StorageKeys.TRIGGER_HISTORY;
 
 /**
  * 简单的存储接口
  */
-interface SimpleStorage {
-  set(key: string, value: string): void;
-  getString(key: string): string | undefined;
-  clearAll(): void;
-}
 
 /**
  * 内存存储实现（用于测试和开发）
  */
-class MemoryStorage implements SimpleStorage {
-  private data: Map<string, string> = new Map();
-
-  set(key: string, value: string): void {
-    this.data.set(key, value);
-  }
-
-  getString(key: string): string | undefined {
-    return this.data.get(key);
-  }
-
-  clearAll(): void {
-    this.data.clear();
-  }
-}
 
 /**
  * MMKV 存储实现
  */
-class MMKVStorage implements SimpleStorage {
-  private storage: any;
-
-  constructor() {
-    try {
-      const { MMKV } = require('react-native-mmkv');
-      this.storage = new MMKV({
-        id: 'predictive-trigger',
-        encryptionKey: 'scenelens-trigger-key',
-      });
-    } catch (error) {
-      console.warn('MMKV not available, using memory storage:', error);
-      this.storage = new MemoryStorage();
-    }
-  }
-
-  set(key: string, value: string): void {
-    this.storage.set(key, value);
-  }
-
-  getString(key: string): string | undefined {
-    return this.storage.getString(key);
-  }
-
-  clearAll(): void {
-    if (this.storage.clearAll) {
-      this.storage.clearAll();
-    } else {
-      // Fallback for memory storage
-      this.storage.data?.clear();
-    }
-  }
-}
 
 /**
  * 停留时间跟踪
@@ -107,7 +58,7 @@ export class PredictiveTrigger {
   /**
    * 存储实例
    */
-  private storage: SimpleStorage;
+  private historyLoaded = false;
 
   /**
    * 触发历史缓存
@@ -123,6 +74,7 @@ export class PredictiveTrigger {
    * 反思层初始化状态
    */
   private reflectionInitialized = false;
+  private reflectionInitialization: Promise<void> | null = null;
 
   /**
    * 配置常量
@@ -148,30 +100,46 @@ export class PredictiveTrigger {
     autoModeUpgradeThreshold: 5,
   };
 
-  constructor() {
-    this.storage = new MMKVStorage();
+  private ensureHistoryLoaded(): void {
+    if (this.historyLoaded) {
+      return;
+    }
+
     
     // 加载历史数据
     this.loadHistoryFromStorage();
     
     // 初始化反思层（异步）
-    this.initializeReflection();
+    this.historyLoaded = true;
   }
 
   /**
    * 初始化反思层
    */
-  private async initializeReflection(): Promise<void> {
-    if (this.reflectionInitialized) return;
-    
-    try {
-      await feedbackLogger.initialize();
-      await weightAdjuster.initialize();
-      this.reflectionInitialized = true;
-      console.log('[PredictiveTrigger] Reflection layer initialized');
-    } catch (error) {
-      console.error('[PredictiveTrigger] Failed to initialize reflection layer:', error);
+  private async ensureReflectionInitialized(): Promise<void> {
+    if (this.reflectionInitialized) {
+      return;
     }
+
+    if (!this.reflectionInitialization) {
+      this.reflectionInitialization = (async () => {
+        await feedbackLogger.initialize();
+        await weightAdjuster.initialize();
+        this.reflectionInitialized = true;
+        console.log('[PredictiveTrigger] Reflection layer initialized');
+      })()
+        .catch((error) => {
+          console.error('[PredictiveTrigger] Failed to initialize reflection layer:', error);
+          throw error;
+        })
+        .finally(() => {
+          if (!this.reflectionInitialized) {
+            this.reflectionInitialization = null;
+          }
+        });
+    }
+
+    await this.reflectionInitialization;
   }
 
   /**
@@ -187,6 +155,7 @@ export class PredictiveTrigger {
    * @returns 触发决策
    */
   shouldTrigger(context: SilentContext): TriggerDecision {
+    this.ensureHistoryLoaded();
     // 1. 检查置信度阈值
     if (context.confidence < this.config.minConfidence || 
         context.confidence > this.config.maxConfidence) {
@@ -250,6 +219,8 @@ export class PredictiveTrigger {
     confidence: number = 0.7,
     contextSignals: string[] = []
   ): void {
+    this.ensureHistoryLoaded();
+
     const history = this.getHistory(sceneType);
     
     // 更新触发时间
@@ -287,10 +258,9 @@ export class PredictiveTrigger {
 
     // === 反思层集成 ===
     // 记录详细反馈到 FeedbackLogger
-    this.logFeedbackToReflection(sceneType, feedback, confidence, contextSignals);
+    void this.syncReflectionFeedback(sceneType, feedback, confidence, contextSignals);
     
     // 触发权重调整检查
-    this.checkWeightAdjustment(sceneType);
 
     // 检查是否应该建议升级为自动模式
     if (this.shouldSuggestAutoMode(history)) {
@@ -310,6 +280,7 @@ export class PredictiveTrigger {
    * @returns 触发历史
    */
   getHistory(sceneType: SceneType): TriggerHistory {
+    this.ensureHistoryLoaded();
     let history = this.historyCache.get(sceneType);
     
     if (!history) {
@@ -334,6 +305,7 @@ export class PredictiveTrigger {
    * @returns 所有触发历史
    */
   getAllHistory(): TriggerHistory[] {
+    this.ensureHistoryLoaded();
     return Array.from(this.historyCache.values());
   }
 
@@ -343,6 +315,7 @@ export class PredictiveTrigger {
    * @param sceneType 场景类型
    */
   clearHistory(sceneType: SceneType): void {
+    this.ensureHistoryLoaded();
     this.historyCache.delete(sceneType);
     this.saveHistoryToStorage();
   }
@@ -351,8 +324,10 @@ export class PredictiveTrigger {
    * 清除所有历史数据
    */
   clearAllHistory(): void {
+    this.ensureHistoryLoaded();
     this.historyCache.clear();
-    this.storage.clearAll();
+    storageManager.delete(TRIGGER_HISTORY_STORAGE_KEY);
+    storageManager.delete(LEGACY_TRIGGER_HISTORY_STORAGE_KEY);
   }
 
   /**
@@ -667,9 +642,13 @@ export class PredictiveTrigger {
    */
   private loadHistoryFromStorage(): void {
     try {
-      const historyJson = this.storage.getString(StorageKeys.USER_FEEDBACK);
-      if (historyJson) {
-        const historyArray: TriggerHistory[] = JSON.parse(historyJson);
+      const historyJson = storageManager.getString(TRIGGER_HISTORY_STORAGE_KEY);
+      const legacyHistoryJson = historyJson
+        ? undefined
+        : storageManager.getString(LEGACY_TRIGGER_HISTORY_STORAGE_KEY);
+      const resolvedHistoryJson = historyJson ?? legacyHistoryJson;
+      if (resolvedHistoryJson) {
+        const historyArray: TriggerHistory[] = JSON.parse(resolvedHistoryJson);
         
         // 重建 Map 并处理数据迁移
         this.historyCache.clear();
@@ -681,6 +660,14 @@ export class PredictiveTrigger {
             lastFeedback: history.lastFeedback ?? null,
           };
           this.historyCache.set(migratedHistory.sceneType, migratedHistory);
+        }
+
+        if (!historyJson && legacyHistoryJson) {
+          storageManager.set(
+            TRIGGER_HISTORY_STORAGE_KEY,
+            JSON.stringify(Array.from(this.historyCache.values()))
+          );
+          storageManager.delete(LEGACY_TRIGGER_HISTORY_STORAGE_KEY);
         }
       }
     } catch (error) {
@@ -696,7 +683,8 @@ export class PredictiveTrigger {
     try {
       const historyArray = Array.from(this.historyCache.values());
       const historyJson = JSON.stringify(historyArray);
-      this.storage.set(StorageKeys.USER_FEEDBACK, historyJson);
+      storageManager.set(TRIGGER_HISTORY_STORAGE_KEY, historyJson);
+      storageManager.delete(LEGACY_TRIGGER_HISTORY_STORAGE_KEY);
     } catch (error) {
       console.warn('Failed to save trigger history to storage:', error);
     }
@@ -717,6 +705,8 @@ export class PredictiveTrigger {
     scenesWithConsecutiveIgnores: number;
     scenesWithHighIgnoreRate: number;
   } {
+    this.ensureHistoryLoaded();
+
     const histories = Array.from(this.historyCache.values());
     
     const totalTriggers = histories.reduce(
@@ -763,6 +753,8 @@ export class PredictiveTrigger {
    * @returns 触发频率调整因子 (0.1 - 2.0)
    */
   getTriggerFrequencyFactor(sceneType: SceneType): number {
+    this.ensureHistoryLoaded();
+
     const history = this.getHistory(sceneType);
     
     // 基础因子
@@ -799,6 +791,8 @@ export class PredictiveTrigger {
    * @param sceneType 场景类型
    */
   resetConsecutiveIgnores(sceneType: SceneType): void {
+    this.ensureHistoryLoaded();
+
     const history = this.getHistory(sceneType);
     history.consecutiveIgnores = 0;
     this.historyCache.set(sceneType, history);
@@ -810,15 +804,13 @@ export class PredictiveTrigger {
   /**
    * 记录反馈到反思层
    */
-  private async logFeedbackToReflection(
+  private async syncReflectionFeedback(
     sceneType: SceneType,
     feedback: UserFeedback,
     confidence: number,
     contextSignals: string[]
   ): Promise<void> {
-    if (!this.reflectionInitialized) {
-      await this.initializeReflection();
-    }
+    await this.ensureReflectionInitialized();
 
     try {
       await feedbackLogger.logFeedback(
@@ -831,13 +823,6 @@ export class PredictiveTrigger {
     } catch (error) {
       console.error('[PredictiveTrigger] Failed to log feedback to reflection:', error);
     }
-  }
-
-  /**
-   * 检查并触发权重调整
-   */
-  private async checkWeightAdjustment(sceneType: SceneType): Promise<void> {
-    if (!this.reflectionInitialized) return;
 
     try {
       await weightAdjuster.onUserFeedback(sceneType);
@@ -846,6 +831,9 @@ export class PredictiveTrigger {
     }
   }
 
+  /**
+   * 检查并触发权重调整
+   */
   /**
    * 获取场景的调整后权重
    * 
@@ -878,7 +866,7 @@ export class PredictiveTrigger {
    */
   async autoApplyWeightAdjustments(): Promise<number> {
     if (!this.reflectionInitialized) {
-      await this.initializeReflection();
+      await this.ensureReflectionInitialized();
     }
     return weightAdjuster.autoApplyRecommendations();
   }

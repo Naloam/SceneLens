@@ -16,6 +16,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 import com.che1sy.scenelens.SceneBridgePackage
+import com.che1sy.scenelens.modules.OppoPermissionPackage
 import com.che1sy.scenelens.modules.SystemSettingsPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -27,6 +28,7 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               // Packages that cannot be autolinked yet can be added manually here, for example:
               add(SceneBridgePackage())
+              add(OppoPermissionPackage())
               add(SystemSettingsPackage())
             }
 

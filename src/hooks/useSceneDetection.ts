@@ -7,7 +7,8 @@
  * - 场景建议管理
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 import { useSceneStore } from '../stores';
 import { useShallow } from 'zustand/react/shallow';
 import { silentContextEngine } from '../sensors';
@@ -15,7 +16,14 @@ import { ruleEngine, SceneExecutor } from '../rules';
 import { sceneSuggestionManager } from '../services/SceneSuggestionManager';
 import { notificationManager } from '../notifications';
 import { predictiveTrigger } from '../core/PredictiveTrigger';
-import type { SilentContext, SceneSuggestionPackage, SuggestionExecutionResult } from '../types';
+import { mapOneTapActionKindToUserFeedback } from '../utils/suggestionFeedback';
+import type {
+  SilentContext,
+  SceneSuggestionPackage,
+  SuggestionExecutionResult,
+  SceneType,
+  OneTapActionKind,
+} from '../types';
 
 export interface UseSceneDetectionReturn {
   // 状态
@@ -42,11 +50,16 @@ const sceneNames: Record<string, string> = {
   UNKNOWN: '未知场景',
 };
 
+function isOneTapActionKind(value: unknown): value is OneTapActionKind {
+  return value === 'execute_all' || value === 'dismiss' || value === 'snooze';
+}
+
 export function useSceneDetection(): UseSceneDetectionReturn {
   // 使用 useShallow 避免选择器返回新对象导致的无限循环
   const {
     currentContext,
     setCurrentContext,
+    setManualScene,
     setIsDetecting,
     setDetectionError,
     addToHistory,
@@ -56,6 +69,7 @@ export function useSceneDetection(): UseSceneDetectionReturn {
     useShallow(state => ({
       currentContext: state.currentContext,
       setCurrentContext: state.setCurrentContext,
+      setManualScene: state.setManualScene,
       setIsDetecting: state.setIsDetecting,
       setDetectionError: state.setDetectionError,
       addToHistory: state.addToHistory,
@@ -67,9 +81,71 @@ export function useSceneDetection(): UseSceneDetectionReturn {
   const [sceneSuggestion, setSceneSuggestion] = useState<SceneSuggestionPackage | null>(null);
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const currentContextRef = useRef<SilentContext | null>(null);
+
+  useEffect(() => {
+    currentContextRef.current = currentContext;
+  }, [currentContext]);
 
   // 初始化
   useEffect(() => {
+    const toSceneType = (value: any): SceneType => {
+      if (typeof value !== 'string') return 'UNKNOWN';
+      const valid: SceneType[] = ['COMMUTE', 'OFFICE', 'HOME', 'STUDY', 'SLEEP', 'TRAVEL', 'UNKNOWN'];
+      return (valid as string[]).includes(value) ? (value as SceneType) : 'UNKNOWN';
+    };
+
+    const executeSub = DeviceEventEmitter.addListener('SceneNotificationExecute', async (data: any) => {
+      try {
+        const sceneType = toSceneType(data?.sceneType ?? data?.sceneId);
+        const actionId = typeof data?.actionId === 'string' ? data.actionId : 'execute';
+        const actionKind: OneTapActionKind = isOneTapActionKind(data?.actionKind)
+          ? data.actionKind
+          : 'execute_all';
+
+        const result = await sceneSuggestionManager.executeSuggestion(sceneType, actionId, {
+          showProgress: true,
+          autoFallback: true,
+        });
+        const userAction = mapOneTapActionKindToUserFeedback(actionKind, result.success);
+
+        addToHistory({
+          sceneType,
+          timestamp: Date.now(),
+          confidence: currentContextRef.current?.confidence ?? 0.7,
+          triggered: true,
+          userAction,
+        });
+        predictiveTrigger.recordFeedback(sceneType, userAction);
+      } catch (error) {
+        console.warn('[useSceneDetection] Notification execute handling failed:', error);
+      }
+    });
+
+    const dismissSub = DeviceEventEmitter.addListener('SceneNotificationDismiss', (data: any) => {
+      const sceneType = toSceneType(data?.sceneType ?? data?.sceneId);
+      addToHistory({
+        sceneType,
+        timestamp: Date.now(),
+        confidence: currentContextRef.current?.confidence ?? 0.5,
+        triggered: true,
+        userAction: 'ignore',
+      });
+      predictiveTrigger.recordFeedback(sceneType, 'ignore');
+    });
+
+    const openSub = DeviceEventEmitter.addListener('SceneNotificationOpen', (data: any) => {
+      const sceneType = toSceneType(data?.sceneType ?? data?.sceneId);
+      addToHistory({
+        sceneType,
+        timestamp: Date.now(),
+        confidence: currentContextRef.current?.confidence ?? 0.5,
+        triggered: true,
+        userAction: null,
+      });
+      setManualScene(sceneType);
+    });
+
     const init = async () => {
       await initializeRuleEngine();
       await initializeSceneSuggestionManager();
@@ -77,7 +153,13 @@ export function useSceneDetection(): UseSceneDetectionReturn {
       setIsInitialized(true);
     };
     init();
-  }, []);
+
+    return () => {
+      executeSub.remove();
+      dismissSub.remove();
+      openSub.remove();
+    };
+  }, [addToHistory, setManualScene]);
 
   const initializeRuleEngine = async () => {
     try {

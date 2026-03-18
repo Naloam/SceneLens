@@ -1,10 +1,11 @@
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { DeviceEventEmitter, Platform } from 'react-native';
 import type {
   SceneType,
   Action,
   SceneSuggestionPackage,
   OneTapAction,
+  OneTapActionKind,
 } from '../types';
 
 // Configure notification behavior
@@ -53,6 +54,13 @@ export interface DailySummaryNotification {
   };
 }
 
+const SCENE_SUGGESTION_CATEGORY = 'scene_suggestion';
+const AUTO_MODE_UPGRADE_CATEGORY = 'auto_mode_upgrade';
+
+function isOneTapActionKind(value: unknown): value is OneTapActionKind {
+  return value === 'execute_all' || value === 'dismiss' || value === 'snooze';
+}
+
 /**
  * 基于场景执行建议包的通知
  */
@@ -77,6 +85,48 @@ class NotificationManagerClass {
   private initialized = false;
   private notificationListener: Notifications.Subscription | null = null;
   private responseListener: Notifications.Subscription | null = null;
+
+  private async ensureInitialized(): Promise<boolean> {
+    if (this.initialized) {
+      return true;
+    }
+
+    return this.initialize();
+  }
+
+  private normalizeSceneNotificationData(
+    data: Record<string, any>,
+    overrides: Partial<{ actionId: string; actionKind: OneTapActionKind }> = {}
+  ): Record<string, any> {
+    return {
+      ...data,
+      sceneType: data?.sceneType ?? data?.sceneId,
+      ...overrides,
+    };
+  }
+
+  private getActionKind(
+    data: Record<string, any>,
+    actionId: string
+  ): OneTapActionKind | undefined {
+    const actionKinds = data?.actionKinds;
+    if (!actionKinds || typeof actionKinds !== 'object') {
+      return undefined;
+    }
+
+    const candidate = (actionKinds as Record<string, unknown>)[actionId];
+    return isOneTapActionKind(candidate) ? candidate : undefined;
+  }
+
+  private buildCategoryActions(actions: OneTapAction[]): Notifications.NotificationAction[] {
+    return actions.map(action => ({
+      identifier: action.id,
+      buttonTitle: action.label,
+      options: {
+        opensAppToForeground: action.action === 'execute_all',
+      },
+    }));
+  }
 
   /**
    * Initialize notification manager and request permissions
@@ -105,6 +155,8 @@ class NotificationManagerClass {
       if (Platform.OS === 'android') {
         await this.setupNotificationChannels();
       }
+
+      await this.setupNotificationCategories();
 
       // Set up listeners
       this.setupListeners();
@@ -183,18 +235,37 @@ class NotificationManagerClass {
    */
   private handleNotificationResponse(response: Notifications.NotificationResponse): void {
     const { notification, actionIdentifier } = response;
-    const data = notification.request.content.data;
+    const data = (notification.request.content.data ?? {}) as Record<string, any>;
 
     console.log('User action:', actionIdentifier);
     console.log('Notification data:', data);
 
+    const availableActionIds = Array.isArray(data.actions)
+      ? data.actions.filter((value): value is string => typeof value === 'string')
+      : [];
+
+    if (availableActionIds.includes(actionIdentifier)) {
+      this.handleExecuteAction(
+        this.normalizeSceneNotificationData(data, {
+          actionId: actionIdentifier,
+          actionKind: this.getActionKind(data, actionIdentifier),
+        })
+      );
+      return;
+    }
+
     // Handle different action types
     if (actionIdentifier === 'execute') {
       // User clicked "一键执行" button
-      this.handleExecuteAction(data);
+      this.handleExecuteAction(
+        this.normalizeSceneNotificationData(data, {
+          actionId: 'execute',
+          actionKind: 'execute_all',
+        })
+      );
     } else if (actionIdentifier === 'dismiss') {
       // User dismissed the notification
-      this.handleDismissAction(data);
+      this.handleDismissAction(this.normalizeSceneNotificationData(data));
     } else if (actionIdentifier === 'accept_auto_mode') {
       // User accepted auto mode upgrade
       this.handleAutoModeUpgradeResponse(data, true);
@@ -203,7 +274,7 @@ class NotificationManagerClass {
       this.handleAutoModeUpgradeResponse(data, false);
     } else if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
       // User tapped the notification itself
-      this.handleDefaultAction(data);
+      this.handleDefaultAction(this.normalizeSceneNotificationData(data));
     }
   }
 
@@ -211,8 +282,7 @@ class NotificationManagerClass {
    * Handle execute action
    */
   private handleExecuteAction(data: any): void {
-    // This will be handled by the scene executor
-    // Emit event or call callback
+    DeviceEventEmitter.emit('SceneNotificationExecute', data);
     console.log('Execute scene actions:', data.sceneType);
   }
 
@@ -220,6 +290,7 @@ class NotificationManagerClass {
    * Handle dismiss action
    */
   private handleDismissAction(data: any): void {
+    DeviceEventEmitter.emit('SceneNotificationDismiss', data);
     console.log('User dismissed scene suggestion:', data.sceneType);
     // Record user feedback
   }
@@ -228,6 +299,7 @@ class NotificationManagerClass {
    * Handle default action (tap on notification)
    */
   private handleDefaultAction(data: any): void {
+    DeviceEventEmitter.emit('SceneNotificationOpen', data);
     console.log('User tapped notification:', data.sceneType);
     // Open app to scene details
   }
@@ -253,8 +325,8 @@ class NotificationManagerClass {
    * Show auto mode upgrade prompt notification
    */
   async showAutoModeUpgradePrompt(prompt: AutoModeUpgradePrompt): Promise<string | null> {
-    if (!this.initialized) {
-      await this.initialize();
+    if (!(await this.ensureInitialized())) {
+      return null;
     }
 
     try {
@@ -268,7 +340,7 @@ class NotificationManagerClass {
             acceptCount: prompt.acceptCount,
             timestamp: Date.now(),
           },
-          categoryIdentifier: 'auto_mode_upgrade',
+          categoryIdentifier: AUTO_MODE_UPGRADE_CATEGORY,
           sound: true,
         },
         trigger: null, // Show immediately
@@ -281,8 +353,8 @@ class NotificationManagerClass {
     }
   }
   async showSceneSuggestion(suggestion: SceneSuggestionNotification): Promise<string | null> {
-    if (!this.initialized) {
-      await this.initialize();
+    if (!(await this.ensureInitialized())) {
+      return null;
     }
 
     try {
@@ -296,7 +368,7 @@ class NotificationManagerClass {
             confidence: suggestion.confidence,
             timestamp: Date.now(),
           },
-          categoryIdentifier: 'scene_suggestion',
+          categoryIdentifier: SCENE_SUGGESTION_CATEGORY,
           sound: true,
         },
         trigger: null, // Show immediately
@@ -317,8 +389,8 @@ class NotificationManagerClass {
     success: boolean,
     message: string
   ): Promise<string | null> {
-    if (!this.initialized) {
-      await this.initialize();
+    if (!(await this.ensureInitialized())) {
+      return null;
     }
 
     try {
@@ -347,8 +419,8 @@ class NotificationManagerClass {
    * Show daily summary notification
    */
   async showDailySummary(summary: DailySummaryNotification): Promise<string | null> {
-    if (!this.initialized) {
-      await this.initialize();
+    if (!(await this.ensureInitialized())) {
+      return null;
     }
 
     try {
@@ -400,8 +472,8 @@ class NotificationManagerClass {
    * Show system notification
    */
   async showSystemNotification(title: string, body: string): Promise<string | null> {
-    if (!this.initialized) {
-      await this.initialize();
+    if (!(await this.ensureInitialized())) {
+      return null;
     }
 
     try {
@@ -451,14 +523,7 @@ class NotificationManagerClass {
    * Set up notification categories with actions
    */
   async setupNotificationCategories(): Promise<void> {
-    if (Platform.OS === 'android') {
-      // Android uses notification channels, not categories
-      // Actions are defined per notification
-      return;
-    }
-
-    // iOS notification categories
-    await Notifications.setNotificationCategoryAsync('scene_suggestion', [
+    await Notifications.setNotificationCategoryAsync(SCENE_SUGGESTION_CATEGORY, [
       {
         identifier: 'execute',
         buttonTitle: '一键执行',
@@ -476,7 +541,7 @@ class NotificationManagerClass {
     ]);
 
     // Auto mode upgrade category
-    await Notifications.setNotificationCategoryAsync('auto_mode_upgrade', [
+    await Notifications.setNotificationCategoryAsync(AUTO_MODE_UPGRADE_CATEGORY, [
       {
         identifier: 'accept_auto_mode',
         buttonTitle: '升级为自动模式',
@@ -533,8 +598,8 @@ class NotificationManagerClass {
   async showSceneSuggestionPackage(
     notification: SceneSuggestionPackageNotification
   ): Promise<string | null> {
-    if (!this.initialized) {
-      await this.initialize();
+    if (!(await this.ensureInitialized())) {
+      return null;
     }
 
     try {
@@ -556,10 +621,10 @@ class NotificationManagerClass {
       // 构建操作按钮
       const actionsToShow = actions ?? scenePackage.oneTapActions.filter(a => a.type === 'primary');
       const primaryAction = actionsToShow[0];
+      const androidActions: Notifications.NotificationAction[] = [];
+      await this.setupSceneSuggestionCategories(scenePackage, actionsToShow);
 
       // 构建 Android 操作按钮
-      const androidActions: Notifications.NotificationAction[] = [];
-
       if (primaryAction && Platform.OS === 'android') {
         androidActions.push({
           identifier: `suggestion_${scenePackage.sceneId}_${primaryAction.id}`,
@@ -587,13 +652,15 @@ class NotificationManagerClass {
         body,
         data: {
           type: 'scene_suggestion_package',
+          sceneType: scenePackage.sceneId,
           sceneId: scenePackage.sceneId,
           scenePackage: JSON.stringify(scenePackage),
           confidence,
           actions: actionsToShow.map(a => a.id),
+          actionKinds: Object.fromEntries(actionsToShow.map(action => [action.id, action.action])),
           timestamp: Date.now(),
         },
-        categoryIdentifier: 'scene_suggestion',
+        categoryIdentifier: `${SCENE_SUGGESTION_CATEGORY}_${scenePackage.sceneId}`,
         sound: true,
       };
 
@@ -620,8 +687,8 @@ class NotificationManagerClass {
     totalCount: number,
     skippedCount: number
   ): Promise<string | null> {
-    if (!this.initialized) {
-      await this.initialize();
+    if (!(await this.ensureInitialized())) {
+      return null;
     }
 
     try {
@@ -666,15 +733,18 @@ class NotificationManagerClass {
    * 为场景执行建议包设置 Android 通知类别
    * 每个场景可以有自定义的操作按钮
    */
-  async setupSceneSuggestionCategories(scenePackage: SceneSuggestionPackage): Promise<void> {
-    if (Platform.OS === 'android') {
+  async setupSceneSuggestionCategories(
+    scenePackage: SceneSuggestionPackage,
+    categoryActionsInput: OneTapAction[] = scenePackage.oneTapActions
+  ): Promise<void> {
+    if (false && Platform.OS === 'android') {
       // Android 使用动态定义的操作按钮，不需要预定义类别
       return;
     }
 
     // iOS 需要预定义通知类别
-    const actions = scenePackage.oneTapActions.map(action => ({
-      identifier: `suggestion_${scenePackage.sceneId}_${action.id}`,
+    const categoryActions = categoryActionsInput.map(action => ({
+      identifier: action.id,
       buttonTitle: action.label,
       options: {
         opensAppToForeground: action.action === 'execute_all',
@@ -682,8 +752,8 @@ class NotificationManagerClass {
     }));
 
     await Notifications.setNotificationCategoryAsync(
-      `scene_suggestion_${scenePackage.sceneId}`,
-      actions
+      `${SCENE_SUGGESTION_CATEGORY}_${scenePackage.sceneId}`,
+      categoryActions
     );
   }
 }

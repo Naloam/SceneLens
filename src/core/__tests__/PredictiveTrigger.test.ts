@@ -4,6 +4,10 @@
 
 import { PredictiveTrigger } from '../PredictiveTrigger';
 import type { SilentContext, SceneType, UserFeedback } from '../../types';
+import { StorageKeys } from '../../types';
+import { feedbackLogger } from '../../reflection/FeedbackLogger';
+import { weightAdjuster } from '../../reflection/WeightAdjuster';
+import { storageManager } from '../../stores/storageManager';
 
 // Mock react-native-mmkv
 jest.mock('react-native-mmkv', () => {
@@ -18,10 +22,39 @@ jest.mock('react-native-mmkv', () => {
   };
 });
 
+jest.mock('../../reflection/FeedbackLogger', () => ({
+  feedbackLogger: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    logFeedback: jest.fn().mockResolvedValue(undefined),
+    getStats: jest.fn().mockReturnValue(null),
+  },
+}));
+
+jest.mock('../../reflection/WeightAdjuster', () => ({
+  weightAdjuster: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    onUserFeedback: jest.fn().mockResolvedValue(undefined),
+    getWeight: jest.fn().mockReturnValue(1),
+    getAdjustmentRecommendations: jest.fn().mockReturnValue([]),
+    autoApplyRecommendations: jest.fn().mockResolvedValue(0),
+  },
+}));
+
+jest.mock('../../notifications/NotificationManager', () => ({
+  notificationManager: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    showAutoModeUpgradePrompt: jest.fn().mockResolvedValue('notification-id'),
+    showSystemNotification: jest.fn().mockResolvedValue('notification-id'),
+  },
+}));
+
+const flushMicrotasks = () => new Promise(resolve => setImmediate(resolve));
+
 describe('PredictiveTrigger', () => {
   let trigger: PredictiveTrigger;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     trigger = new PredictiveTrigger();
     // Reset dwell tracker for each test
     trigger.resetDwellTracker();
@@ -29,6 +62,7 @@ describe('PredictiveTrigger', () => {
 
   afterEach(() => {
     trigger.clearAllHistory();
+    jest.restoreAllMocks();
   });
 
   describe('shouldTrigger', () => {
@@ -134,6 +168,27 @@ describe('PredictiveTrigger', () => {
   });
 
   describe('recordFeedback', () => {
+    it('should avoid reflection initialization in the constructor', () => {
+      expect(feedbackLogger.initialize).not.toHaveBeenCalled();
+      expect(weightAdjuster.initialize).not.toHaveBeenCalled();
+    });
+
+    it('should initialize reflection lazily and keep the first feedback weight adjustment', async () => {
+      trigger.recordFeedback('COMMUTE', 'accept');
+      await flushMicrotasks();
+
+      expect(feedbackLogger.initialize).toHaveBeenCalledTimes(1);
+      expect(weightAdjuster.initialize).toHaveBeenCalledTimes(1);
+      expect(feedbackLogger.logFeedback).toHaveBeenCalledWith(
+        'COMMUTE',
+        'accept',
+        0.7,
+        [],
+        expect.any(Array)
+      );
+      expect(weightAdjuster.onUserFeedback).toHaveBeenCalledWith('COMMUTE');
+    });
+
     it('should record accept feedback correctly', () => {
       trigger.recordFeedback('COMMUTE', 'accept');
 
@@ -289,6 +344,67 @@ describe('PredictiveTrigger', () => {
 
       const allHistory = trigger.getAllHistory();
       expect(allHistory).toHaveLength(0);
+    });
+
+    it('should clear both dedicated and legacy trigger history keys', () => {
+      const deleteSpy = jest.spyOn(storageManager, 'delete').mockImplementation(() => undefined);
+
+      trigger.clearAllHistory();
+
+      expect(deleteSpy).toHaveBeenCalledWith(StorageKeys.TRIGGER_HISTORY);
+      expect(deleteSpy).toHaveBeenCalledWith(StorageKeys.USER_FEEDBACK);
+    });
+  });
+
+  describe('storage migration', () => {
+    it('should migrate legacy trigger history into the dedicated storage key', () => {
+      const legacyHistory = [
+        {
+          sceneType: 'COMMUTE',
+          lastTriggerTime: 123,
+          acceptCount: 2,
+          ignoreCount: 1,
+          cancelCount: 0,
+        },
+      ];
+      const getStringSpy = jest
+        .spyOn(storageManager, 'getString')
+        .mockImplementation((key: string) => {
+          if (key === StorageKeys.TRIGGER_HISTORY) {
+            return undefined;
+          }
+
+          if (key === StorageKeys.USER_FEEDBACK) {
+            return JSON.stringify(legacyHistory);
+          }
+
+          return undefined;
+        });
+      const setSpy = jest.spyOn(storageManager, 'set').mockImplementation(() => undefined);
+      const deleteSpy = jest.spyOn(storageManager, 'delete').mockImplementation(() => undefined);
+
+      const history = trigger.getHistory('COMMUTE');
+      const migratedCall = setSpy.mock.calls.find(
+        ([key]) => key === StorageKeys.TRIGGER_HISTORY
+      );
+
+      expect(history.acceptCount).toBe(2);
+      expect(history.ignoreCount).toBe(1);
+      expect(history.consecutiveIgnores).toBe(0);
+      expect(history.lastFeedback).toBe(null);
+      expect(getStringSpy).toHaveBeenCalledWith(StorageKeys.TRIGGER_HISTORY);
+      expect(getStringSpy).toHaveBeenCalledWith(StorageKeys.USER_FEEDBACK);
+      expect(migratedCall).toBeDefined();
+      expect(JSON.parse(migratedCall?.[1] as string)).toEqual([
+        expect.objectContaining({
+          sceneType: 'COMMUTE',
+          acceptCount: 2,
+          ignoreCount: 1,
+          consecutiveIgnores: 0,
+          lastFeedback: null,
+        }),
+      ]);
+      expect(deleteSpy).toHaveBeenCalledWith(StorageKeys.USER_FEEDBACK);
     });
   });
 

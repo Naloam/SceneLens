@@ -381,7 +381,7 @@ describe('用户触发识别集成测试', () => {
       expect(mockModelRunner.runAudioClassification).toHaveBeenCalledWith({
         samples: expect.any(Float32Array),
         sampleRate: 16000,
-        duration: 1000,
+        duration: 1,
       });
 
       // Verify results
