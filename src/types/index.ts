@@ -310,6 +310,7 @@ export const StorageKeys = {
   APP_PREFERENCES: 'app_preferences',
   SCENE_HISTORY: 'scene_history',
   USER_FEEDBACK: 'user_feedback',
+  TRIGGER_HISTORY: 'trigger_history',
   RULE_WEIGHTS: 'rule_weights',
   GEO_FENCES: 'geo_fences',
   USER_CONFIG: 'user_config',
@@ -367,6 +368,7 @@ export class SceneLensError extends Error {
  */
 export interface ImageData {
   base64: string;      // Base64 编码的图像数据
+  rgbBase64?: string;  // 可选：原生层提供的 224x224x3 RGB 原始字节
   width: number;       // 图像宽度
   height: number;      // 图像高度
   format: string;      // 图像格式 (JPEG, PNG)

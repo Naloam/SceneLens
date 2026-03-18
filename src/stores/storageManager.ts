@@ -19,7 +19,9 @@ import { StorageKeys } from '../types';
 interface SimpleStorage {
   set(key: string, value: string): void;
   getString(key: string): string | undefined;
+  delete(key: string): void;
   clearAll(): void;
+  getStorageType(): 'MMKV' | 'Memory';
 }
 
 /**
@@ -36,8 +38,16 @@ class MemoryStorage implements SimpleStorage {
     return this.data.get(key);
   }
 
+  delete(key: string): void {
+    this.data.delete(key);
+  }
+
   clearAll(): void {
     this.data.clear();
+  }
+
+  getStorageType(): 'Memory' {
+    return 'Memory';
   }
 }
 
@@ -46,6 +56,7 @@ class MemoryStorage implements SimpleStorage {
  */
 class MMKVStorage implements SimpleStorage {
   private storage: any;
+  private usingMemoryFallback = false;
 
   constructor() {
     try {
@@ -57,6 +68,7 @@ class MMKVStorage implements SimpleStorage {
     } catch (error) {
       console.warn('MMKV not available, using memory storage:', error);
       this.storage = new MemoryStorage();
+      this.usingMemoryFallback = true;
     }
   }
 
@@ -68,6 +80,20 @@ class MMKVStorage implements SimpleStorage {
     return this.storage.getString(key);
   }
 
+  delete(key: string): void {
+    if (typeof this.storage.remove === 'function') {
+      this.storage.remove(key);
+      return;
+    }
+
+    if (typeof this.storage.delete === 'function') {
+      this.storage.delete(key);
+      return;
+    }
+
+    this.storage.set(key, '');
+  }
+
   clearAll(): void {
     if (this.storage.clearAll) {
       this.storage.clearAll();
@@ -75,6 +101,10 @@ class MMKVStorage implements SimpleStorage {
       // Fallback for memory storage
       this.storage.data?.clear();
     }
+  }
+
+  getStorageType(): 'MMKV' | 'Memory' {
+    return this.usingMemoryFallback ? 'Memory' : 'MMKV';
   }
 }
 
@@ -109,7 +139,7 @@ class StorageManagerClass {
    */
   delete(key: string): void {
     // MMKV 没有 delete 方法，通过设置空值模拟
-    this.storage.set(key, '');
+    this.storage.delete(key);
   }
 
   /**
@@ -340,11 +370,12 @@ class StorageManagerClass {
     hasMMKV: boolean;
     storageType: string;
   } {
-    const hasMMKV = this.storage.constructor.name !== 'MemoryStorage';
+    const storageType = this.storage.getStorageType();
+    const hasMMKV = storageType === 'MMKV';
     
     return {
       hasMMKV,
-      storageType: hasMMKV ? 'MMKV' : 'Memory',
+      storageType,
     };
   }
 }

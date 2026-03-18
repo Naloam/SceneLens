@@ -218,8 +218,7 @@ class GeoFenceManagerClass {
       const geoFencesJson = JSON.stringify(data);
       
       // 使用 storageManager 的内部存储实例
-      const storage = (storageManager as any).storage;
-      storage.set(StorageKeys.GEO_FENCES, geoFencesJson);
+      storageManager.set(StorageKeys.GEO_FENCES, geoFencesJson);
     } catch (error) {
       console.error('Failed to save geo fences:', error);
       throw error;
@@ -232,8 +231,7 @@ class GeoFenceManagerClass {
   private async loadGeoFences(): Promise<void> {
     try {
       // 使用 storageManager 的内部存储实例
-      const storage = (storageManager as any).storage;
-      const geoFencesJson = storage.getString(StorageKeys.GEO_FENCES);
+      const geoFencesJson = storageManager.getString(StorageKeys.GEO_FENCES);
       
       if (geoFencesJson) {
         const data = JSON.parse(geoFencesJson);

@@ -2,6 +2,8 @@
  * React Native Mock for Jest Tests
  */
 
+const listeners = new Map();
+
 const NativeModules = {
   SceneBridge: {
     ping: jest.fn(() => Promise.resolve({ message: 'mock', timestamp: Date.now() })),
@@ -50,8 +52,105 @@ const NativeModules = {
       timestamp: Date.now() 
     })),
   },
+  SystemSettings: {
+    checkDoNotDisturbPermission: jest.fn(() => Promise.resolve(false)),
+    openDoNotDisturbSettings: jest.fn(() => Promise.resolve(false)),
+    checkWriteSettingsPermission: jest.fn(() => Promise.resolve(false)),
+    openWriteSettingsSettings: jest.fn(() => Promise.resolve(false)),
+    openNotificationSettings: jest.fn(() => Promise.resolve(false)),
+    checkBluetoothPermission: jest.fn(() => Promise.resolve(false)),
+    requestBluetoothPermission: jest.fn(() => Promise.resolve(false)),
+  },
+  OppoPermission: {
+    isOppoDevice: jest.fn(() => Promise.resolve(false)),
+    openOppoPermissionSettings: jest.fn(() => Promise.resolve(true)),
+  },
+  SourceCode: {
+    scriptURL: 'http://localhost:8081/index.bundle?platform=android',
+  },
+};
+
+const DeviceEventEmitter = {
+  addListener: jest.fn((eventName, handler) => {
+    const handlers = listeners.get(eventName) || new Set();
+    handlers.add(handler);
+    listeners.set(eventName, handlers);
+
+    return {
+      remove: jest.fn(() => {
+        handlers.delete(handler);
+        if (handlers.size === 0) {
+          listeners.delete(eventName);
+        }
+      }),
+    };
+  }),
+  emit: jest.fn((eventName, payload) => {
+    const handlers = listeners.get(eventName);
+    if (!handlers) {
+      return false;
+    }
+
+    handlers.forEach(handler => handler(payload));
+    return true;
+  }),
+};
+
+const Platform = {
+  OS: 'android',
+  Version: 34,
+  select: spec => spec.android ?? spec.default,
+};
+
+const Image = {
+  resolveAssetSource: jest.fn(source => {
+    if (typeof source === 'number') {
+      return { uri: `file:///mock-asset-${source}` };
+    }
+
+    if (typeof source === 'string') {
+      return { uri: source };
+    }
+
+    return source ?? { uri: 'file:///mock-asset' };
+  }),
+};
+
+const Linking = {
+  openSettings: jest.fn(() => Promise.resolve()),
+};
+
+const Alert = {
+  alert: jest.fn(),
+};
+
+const PermissionsAndroid = {
+  PERMISSIONS: {
+    ACCESS_FINE_LOCATION: 'android.permission.ACCESS_FINE_LOCATION',
+    ACCESS_COARSE_LOCATION: 'android.permission.ACCESS_COARSE_LOCATION',
+    READ_CALENDAR: 'android.permission.READ_CALENDAR',
+    WRITE_CALENDAR: 'android.permission.WRITE_CALENDAR',
+    POST_NOTIFICATIONS: 'android.permission.POST_NOTIFICATIONS',
+    RECORD_AUDIO: 'android.permission.RECORD_AUDIO',
+    CAMERA: 'android.permission.CAMERA',
+    READ_EXTERNAL_STORAGE: 'android.permission.READ_EXTERNAL_STORAGE',
+    WRITE_EXTERNAL_STORAGE: 'android.permission.WRITE_EXTERNAL_STORAGE',
+  },
+  RESULTS: {
+    GRANTED: 'granted',
+    DENIED: 'denied',
+    NEVER_ASK_AGAIN: 'never_ask_again',
+  },
+  check: jest.fn(() => Promise.resolve(true)),
+  request: jest.fn(() => Promise.resolve('granted')),
 };
 
 module.exports = {
   NativeModules,
+  DeviceEventEmitter,
+  Platform,
+  Image,
+  Linking,
+  Alert,
+  PermissionsAndroid,
 };

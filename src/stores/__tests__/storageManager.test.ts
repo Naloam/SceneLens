@@ -177,12 +177,43 @@ describe('StorageManager', () => {
   });
 
   describe('Storage Info', () => {
+    it('should delete stored values instead of leaving empty strings behind', () => {
+      storageManager.set('test-key', 'test-value');
+      expect(storageManager.getString('test-key')).toBe('test-value');
+
+      storageManager.delete('test-key');
+
+      expect(storageManager.getString('test-key')).toBeUndefined();
+    });
+
     it('should return storage info', () => {
       const info = storageManager.getStorageInfo();
       expect(info).toHaveProperty('hasMMKV');
       expect(info).toHaveProperty('storageType');
       expect(typeof info.hasMMKV).toBe('boolean');
       expect(typeof info.storageType).toBe('string');
+    });
+
+    it('should report memory fallback when MMKV initialization fails', () => {
+      jest.resetModules();
+      jest.doMock('react-native-mmkv', () => ({
+        MMKV: jest.fn(() => {
+          throw new Error('MMKV unavailable');
+        }),
+      }));
+
+      let isolatedStorageManager!: typeof storageManager;
+      jest.isolateModules(() => {
+        ({ storageManager: isolatedStorageManager } = require('../storageManager'));
+      });
+
+      expect(isolatedStorageManager.getStorageInfo()).toEqual({
+        hasMMKV: false,
+        storageType: 'Memory',
+      });
+
+      jest.unmock('react-native-mmkv');
+      jest.resetModules();
     });
   });
 });

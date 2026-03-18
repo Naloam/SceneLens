@@ -3,7 +3,14 @@
  */
 
 import { geoFenceManager } from '../geoFenceManager';
+import { storageManager } from '../storageManager';
+import { StorageKeys } from '../../types';
 import type { Location } from '../../types';
+
+const resetGeoFenceManagerState = () => {
+  (geoFenceManager as any).geoFences = new Map();
+  (geoFenceManager as any).initialized = false;
+};
 
 describe('GeoFenceManager', () => {
   beforeEach(async () => {
@@ -257,6 +264,37 @@ describe('GeoFenceManager', () => {
       expect(stats.byType.OFFICE).toBe(1);
       expect(stats.byType.SUBWAY_STATION).toBe(0);
       expect(stats.byType.CUSTOM).toBe(0);
+    });
+  });
+  describe('Persistence', () => {
+    it('should reload geo fences from storage', async () => {
+      const persistedFence = {
+        id: 'persisted-home',
+        name: 'Persisted Home',
+        type: 'HOME' as const,
+        latitude: 39.9042,
+        longitude: 116.4074,
+        radius: 120,
+      };
+
+      storageManager.set(
+        StorageKeys.GEO_FENCES,
+        JSON.stringify([[persistedFence.id, persistedFence]])
+      );
+
+      resetGeoFenceManagerState();
+      await geoFenceManager.initialize();
+
+      expect(geoFenceManager.getGeoFence(persistedFence.id)).toEqual(persistedFence);
+    });
+
+    it('should recover from corrupted stored geo fences', async () => {
+      storageManager.set(StorageKeys.GEO_FENCES, 'not-json');
+
+      resetGeoFenceManagerState();
+      await geoFenceManager.initialize();
+
+      expect(geoFenceManager.getAllGeoFences()).toEqual([]);
     });
   });
 });

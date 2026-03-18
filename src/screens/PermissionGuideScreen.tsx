@@ -1,33 +1,54 @@
 import React, { useEffect } from 'react';
 import {
-  ScrollView,
-  View,
-  StyleSheet,
   Alert,
+  ScrollView,
+  StyleSheet,
+  View,
 } from 'react-native';
 import {
-  Card,
-  Text,
-  Button,
-  List,
-  Divider,
-  Chip,
-  ProgressBar,
   Banner,
-  Checkbox,
-  Switch,
-  useTheme,
+  Button,
+  Card,
+  Chip,
+  Divider,
+  List,
   MD3Colors,
-  IconButton,
+  ProgressBar,
+  Text,
+  useTheme,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { usePermissionStore } from '../stores';
-import { sceneBridge } from '../core/SceneBridge';
-import type { PermissionType } from '../stores';
+import type { PermissionStatus, PermissionType } from '../stores';
+import {
+  permissionManager,
+  PermissionStatus as RuntimePermissionStatus,
+  PermissionType as RuntimePermissionType,
+} from '../utils/PermissionManager';
 
-/**
- * 权限图标映射
- */
+const GUIDE_PERMISSION_MAP: Record<PermissionType, RuntimePermissionType> = {
+  LOCATION: RuntimePermissionType.LOCATION_FINE,
+  ACTIVITY_RECOGNITION: RuntimePermissionType.ACTIVITY_RECOGNITION,
+  USAGE_STATS: RuntimePermissionType.USAGE_STATS,
+  CAMERA: RuntimePermissionType.CAMERA,
+  MICROPHONE: RuntimePermissionType.MICROPHONE,
+  NOTIFICATIONS: RuntimePermissionType.NOTIFICATIONS,
+  DO_NOT_DISTURB: RuntimePermissionType.NOTIFICATION_POLICY,
+};
+
+function toGuidePermissionStatus(
+  status: RuntimePermissionStatus
+): 'granted' | 'denied' | 'not_requested' {
+  switch (status) {
+    case RuntimePermissionStatus.GRANTED:
+      return 'granted';
+    case RuntimePermissionStatus.UNDETERMINED:
+      return 'not_requested';
+    default:
+      return 'denied';
+  }
+}
+
 const PERMISSION_ICONS: Record<PermissionType, string> = {
   LOCATION: 'map-marker-radius',
   ACTIVITY_RECOGNITION: 'run-fast',
@@ -38,9 +59,6 @@ const PERMISSION_ICONS: Record<PermissionType, string> = {
   DO_NOT_DISTURB: 'bell-cancel',
 };
 
-/**
- * 权限颜色映射（Material Design 3）
- */
 const PERMISSION_COLORS: Record<PermissionType, string> = {
   LOCATION: '#1976D2',
   ACTIVITY_RECOGNITION: '#E65100',
@@ -51,9 +69,6 @@ const PERMISSION_COLORS: Record<PermissionType, string> = {
   DO_NOT_DISTURB: '#455A64',
 };
 
-/**
- * 权限中文名称映射
- */
 const PERMISSION_NAMES: Record<PermissionType, string> = {
   LOCATION: '位置信息',
   ACTIVITY_RECOGNITION: '身体活动',
@@ -64,10 +79,6 @@ const PERMISSION_NAMES: Record<PermissionType, string> = {
   DO_NOT_DISTURB: '勿扰模式',
 };
 
-/**
- * 新版权限引导屏幕
- * 使用 React Native Paper 组件和 Material Design 3 规范
- */
 export const PermissionGuideScreen: React.FC = () => {
   const theme = useTheme();
 
@@ -78,136 +89,86 @@ export const PermissionGuideScreen: React.FC = () => {
     setPermissionLastRequested,
     setIsCheckingPermissions,
     getRequiredPermissions,
-    getAllGrantedPermissions,
   } = usePermissionStore();
 
-  useEffect(() => {
-    checkAllPermissions();
-  }, []);
+  const permissionList = Array.from(permissions.values());
+  const requiredPermissions = getRequiredPermissions();
+  const grantedRequiredPermissions = requiredPermissions.filter(
+    permission => permission.status === 'granted'
+  );
+  const allRequiredGranted =
+    requiredPermissions.length > 0 &&
+    requiredPermissions.every(permission => permission.status === 'granted');
+  const progressValue =
+    requiredPermissions.length > 0
+      ? grantedRequiredPermissions.length / requiredPermissions.length
+      : 0;
 
-  /**
-   * 检查所有权限状态
-   */
+  const checkPermission = async (type: PermissionType) => {
+    try {
+      const result = await permissionManager.checkPermission(GUIDE_PERMISSION_MAP[type]);
+      setPermissionStatus(type, toGuidePermissionStatus(result.status));
+    } catch (error) {
+      console.error(`Failed to check ${type} permission:`, error);
+      setPermissionStatus(type, 'unknown');
+    }
+  };
+
   const checkAllPermissions = async () => {
     setIsCheckingPermissions(true);
     try {
-      for (const [type] of permissions) {
+      for (const type of permissions.keys()) {
         await checkPermission(type);
       }
     } catch (error) {
-      console.error('检查权限失败:', error);
+      console.error('Failed to check permissions:', error);
     } finally {
       setIsCheckingPermissions(false);
     }
   };
 
-  /**
-   * 检查单个权限状态
-   */
-  const checkPermission = async (type: PermissionType) => {
-    try {
-      let hasPermission = false;
-
-      switch (type) {
-        case 'LOCATION':
-          hasPermission = await sceneBridge.hasLocationPermission();
-          break;
-        case 'ACTIVITY_RECOGNITION':
-          hasPermission = await sceneBridge.hasActivityRecognitionPermission();
-          break;
-        case 'USAGE_STATS':
-          hasPermission = await sceneBridge.hasUsageStatsPermission();
-          break;
-        case 'CAMERA':
-          hasPermission = await sceneBridge.hasCameraPermission();
-          break;
-        case 'MICROPHONE':
-          // 麦克风权限检查 - 使用通用权限检查
-          hasPermission = await sceneBridge.checkPermission('android.permission.RECORD_AUDIO');
-          break;
-        case 'DO_NOT_DISTURB':
-          // 勿扰模式权限检查
-          hasPermission = await sceneBridge.checkDoNotDisturbPermission();
-          break;
-        case 'NOTIFICATIONS':
-          hasPermission = true;
-          break;
-        default:
-          hasPermission = false;
-      }
-
-      setPermissionStatus(type, hasPermission ? 'granted' : 'denied');
-    } catch (error) {
-      console.error(`检查 ${type} 权限失败:`, error);
-      setPermissionStatus(type, 'unknown');
-    }
-  };
-
-  /**
-   * 请求权限
-   */
   const requestPermission = async (type: PermissionType) => {
     setPermissionLastRequested(type, Date.now());
 
     try {
-      let granted = false;
+      const runtimePermission = GUIDE_PERMISSION_MAP[type];
+      const requestStatus = await permissionManager.requestPermission(runtimePermission);
+      const result = await permissionManager.checkPermission(runtimePermission);
+      const isGranted = result.status === RuntimePermissionStatus.GRANTED;
 
-      switch (type) {
-        case 'LOCATION':
-          granted = await sceneBridge.requestLocationPermission();
-          break;
-        case 'ACTIVITY_RECOGNITION':
-          granted = await sceneBridge.requestActivityRecognitionPermission();
-          break;
-        case 'USAGE_STATS':
-          granted = await sceneBridge.requestUsageStatsPermission();
-          Alert.alert(
-            '使用情况访问权限',
-            '请在设置中找到 SceneLens 并授予"使用情况访问"权限',
-            [{ text: '知道了' }]
-          );
-          break;
-        case 'CAMERA':
-          granted = await sceneBridge.requestCameraPermission();
-          break;
-        case 'MICROPHONE':
-          // 麦克风权限请求
-          granted = await sceneBridge.requestPermission('android.permission.RECORD_AUDIO');
-          break;
-        case 'DO_NOT_DISTURB':
-          // 勿扰模式权限请求 - 引导用户到设置
-          granted = await sceneBridge.openDoNotDisturbSettings();
-          Alert.alert(
-            '勿扰模式权限',
-            '请在设置中找到 SceneLens，授予修改系统设置权限，以便自动开启勿扰模式',
-            [{ text: '知道了' }]
-          );
-          break;
-        case 'NOTIFICATIONS':
-          granted = true;
-          break;
-        default:
-          Alert.alert('提示', '该权限暂不支持请求');
-          return;
+      setPermissionStatus(type, toGuidePermissionStatus(result.status));
+
+      if (isGranted) {
+        Alert.alert('成功', '权限已授予，或已打开系统设置。');
+        return;
       }
 
-      setPermissionStatus(type, granted ? 'granted' : 'denied');
-
-      if (granted) {
-        Alert.alert('成功', '权限已授予或已打开设置');
-      } else {
-        Alert.alert('提示', '权限被拒绝，部分功能可能无法使用');
+      if (
+        requestStatus === RuntimePermissionStatus.PERMANENTLY_DENIED ||
+        result.status === RuntimePermissionStatus.PERMANENTLY_DENIED
+      ) {
+        await permissionManager.openSpecificSettings(runtimePermission);
+        Alert.alert('提示', '请在系统设置中完成权限配置。');
+        return;
       }
+
+      if (requestStatus === RuntimePermissionStatus.REQUIRES_SETTINGS) {
+        Alert.alert('提示', '请在系统设置中完成权限配置。');
+        return;
+      }
+
+      Alert.alert('提示', '权限被拒绝，部分功能可能无法使用。');
     } catch (error) {
-      console.error(`请求 ${type} 权限失败:`, error);
-      Alert.alert('错误', '请求权限失败');
+      console.error(`Request ${type} permission failed:`, error);
+      Alert.alert('错误', '请求权限失败。');
     }
   };
 
-  /**
-   * 获取状态对应的 Chip 样式
-   */
-  const getStatusChip = (status: string) => {
+  useEffect(() => {
+    void checkAllPermissions();
+  }, []);
+
+  const getStatusChip = (status: PermissionStatus) => {
     switch (status) {
       case 'granted':
         return (
@@ -218,7 +179,7 @@ export const PermissionGuideScreen: React.FC = () => {
             style={styles.chip}
             textStyle={styles.chipText}
           >
-            已授予
+            已授权
           </Chip>
         );
       case 'denied':
@@ -260,26 +221,11 @@ export const PermissionGuideScreen: React.FC = () => {
     }
   };
 
-  /**
-   * 获取是否所有必需权限已授予
-   */
-  const requiredPermissions = getRequiredPermissions();
-  const grantedPermissions = getAllGrantedPermissions();
-  const allRequiredGranted =
-    requiredPermissions.length > 0 &&
-    requiredPermissions.every((p) => p.status === 'granted');
-
-  const progressValue =
-    requiredPermissions.length > 0
-      ? grantedPermissions.length / requiredPermissions.length
-      : 0;
-
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       contentContainerStyle={styles.contentContainer}
     >
-      {/* 标题区域 */}
       <View style={styles.header}>
         <Text variant="headlineMedium" style={styles.title}>
           权限管理
@@ -292,7 +238,6 @@ export const PermissionGuideScreen: React.FC = () => {
         </Text>
       </View>
 
-      {/* 进度卡片 */}
       <Card mode="elevated" style={styles.card}>
         <Card.Content>
           <View style={styles.progressHeader}>
@@ -303,10 +248,13 @@ export const PermissionGuideScreen: React.FC = () => {
               mode="flat"
               compact
               icon="check"
-              style={[styles.progressChip, { backgroundColor: theme.colors.primaryContainer }]}
+              style={[
+                styles.progressChip,
+                { backgroundColor: theme.colors.primaryContainer },
+              ]}
               textStyle={{ color: theme.colors.onPrimaryContainer }}
             >
-              {grantedPermissions.length}/{requiredPermissions.length}
+              {grantedRequiredPermissions.length}/{requiredPermissions.length}
             </Chip>
           </View>
 
@@ -334,7 +282,6 @@ export const PermissionGuideScreen: React.FC = () => {
         </Card.Content>
       </Card>
 
-      {/* 隐私承诺 Banner（浅绿色背景） */}
       <Banner
         visible
         icon={({ size }) => (
@@ -349,7 +296,7 @@ export const PermissionGuideScreen: React.FC = () => {
           <View style={styles.privacyItem}>
             <Icon name="lock" size={16} color="#2E7D32" />
             <Text variant="bodySmall" style={styles.privacyText}>
-              所有数据仅在本地处理，不上传到云端
+              所有数据仅在本地处理，不会上传到云端
             </Text>
           </View>
           <View style={styles.privacyItem}>
@@ -361,32 +308,38 @@ export const PermissionGuideScreen: React.FC = () => {
           <View style={styles.privacyItem}>
             <Icon name="map-marker-radius" size={16} color="#2E7D32" />
             <Text variant="bodySmall" style={styles.privacyText}>
-              位置信息使用粗定位（精度约100米）
+              位置信息使用粗定位，减少不必要的精度暴露
             </Text>
           </View>
           <View style={styles.privacyItem}>
             <Icon name="cancel" size={16} color="#2E7D32" />
             <Text variant="bodySmall" style={styles.privacyText}>
-              您可以随时撤销权限
+              您可以随时在系统设置中撤回权限
             </Text>
           </View>
         </View>
       </Banner>
 
-      {/* 权限列表 */}
       <Card mode="elevated" style={styles.permissionsCard}>
         <Card.Content style={styles.permissionsCardContent}>
           <Text variant="titleMedium" style={styles.sectionTitle}>
             权限列表
           </Text>
 
-          {Array.from(permissions.values()).map((permission, index) => (
+          {permissionList.map((permission, index) => (
             <View key={permission.type}>
               <List.Item
                 title={PERMISSION_NAMES[permission.type]}
                 description={permission.description}
                 left={(props) => (
-                  <View style={[styles.iconContainer, { backgroundColor: PERMISSION_COLORS[permission.type] + '20' }]}>
+                  <View
+                    style={[
+                      styles.iconContainer,
+                      {
+                        backgroundColor: `${PERMISSION_COLORS[permission.type]}20`,
+                      },
+                    ]}
+                  >
                     <Icon
                       name={PERMISSION_ICONS[permission.type]}
                       size={24}
@@ -401,8 +354,14 @@ export const PermissionGuideScreen: React.FC = () => {
                       <Chip
                         mode="flat"
                         compact
-                        style={[styles.requiredChip, { backgroundColor: theme.colors.errorContainer }]}
-                        textStyle={{ color: theme.colors.onErrorContainer, fontSize: 10 }}
+                        style={[
+                          styles.requiredChip,
+                          { backgroundColor: theme.colors.errorContainer },
+                        ]}
+                        textStyle={{
+                          color: theme.colors.onErrorContainer,
+                          fontSize: 10,
+                        }}
                       >
                         必需
                       </Chip>
@@ -425,7 +384,7 @@ export const PermissionGuideScreen: React.FC = () => {
                 </Button>
               )}
 
-              {index < Array.from(permissions.values()).length - 1 && (
+              {index < permissionList.length - 1 && (
                 <Divider style={styles.divider} />
               )}
             </View>
@@ -433,7 +392,6 @@ export const PermissionGuideScreen: React.FC = () => {
         </Card.Content>
       </Card>
 
-      {/* 刷新按钮 */}
       <Button
         mode="contained"
         onPress={checkAllPermissions}
