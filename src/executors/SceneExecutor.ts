@@ -3,6 +3,9 @@ import SceneBridge from '../core/SceneBridge';
 import { appDiscoveryEngine } from '../discovery';
 import { notificationManager } from '../notifications/NotificationManager';
 import { deepLinkManager } from '../utils/deepLinkManager';
+import { SystemSettingsController } from '../automation/SystemSettingsController';
+import { resolveDoNotDisturbSettings } from '../automation/systemSettingTransforms';
+import type { VolumeStreamType } from '../types/automation';
 
 /**
  * 执行结果
@@ -21,6 +24,19 @@ export interface ExecutionResult {
  */
 export class SceneExecutor {
   private isInitialized = false;
+
+  private resolveVolumeParams(params: Record<string, any> | undefined): { streamType: VolumeStreamType; levelPercent: number } {
+    const rawLevel = typeof params?.level === 'number' ? params.level : 50;
+    const levelPercent = rawLevel <= 1 ? Math.round(rawLevel * 100) : Math.round(rawLevel);
+    const rawStream = typeof params?.streamType === 'string' ? params.streamType.toLowerCase() : 'media';
+    const streamType: VolumeStreamType = ['media', 'ring', 'notification', 'alarm', 'system'].includes(rawStream)
+      ? (rawStream as VolumeStreamType)
+      : 'media';
+    return {
+      streamType,
+      levelPercent: Math.max(0, Math.min(100, levelPercent)),
+    };
+  }
 
   /**
    * 初始化执行器
@@ -86,15 +102,31 @@ export class SceneExecutor {
    */
   private async executeSystemAction(action: Action): Promise<void> {
     switch (action.action) {
-      case 'setDoNotDisturb':
-        await SceneBridge.setDoNotDisturb(
-          action.params?.enable ?? false
-        );
+      case 'setDoNotDisturb': {
+        const { enabled, mode } = resolveDoNotDisturbSettings(action.params);
+        const success = await SystemSettingsController.setDoNotDisturb(enabled, mode);
+        if (!success) {
+          throw new Error(`Failed to set do not disturb: enabled=${enabled}, mode=${mode}`);
+        }
         break;
+      }
 
-      case 'setBrightness':
-        await SceneBridge.setBrightness(action.params?.level ?? 0.5);
+      case 'setBrightness': {
+        const success = await SystemSettingsController.setBrightness(action.params?.level ?? 0.5);
+        if (!success) {
+          throw new Error(`Failed to set brightness: ${action.params?.level ?? 0.5}`);
+        }
         break;
+      }
+
+      case 'setVolume': {
+        const { streamType, levelPercent } = this.resolveVolumeParams(action.params);
+        const success = await SystemSettingsController.setVolume(streamType, levelPercent);
+        if (!success) {
+          throw new Error(`Failed to set volume: ${streamType}=${levelPercent}%`);
+        }
+        break;
+      }
 
       default:
         throw new Error(`Unknown system action: ${action.action}`);
@@ -183,13 +215,18 @@ export class SceneExecutor {
       });
       return;
     }
+    if (action.action === 'execution_result') {
+      await notificationManager.showExecutionResult(
+        action.params?.sceneType ?? 'UNKNOWN',
+        action.params?.success ?? true,
+        action.params?.body ?? action.params?.message ?? '执行完成'
+      );
+      return;
+    }
 
-    // 兜底日志
-    console.log('Notification action (fallback):', {
-      title: action.params?.title,
-      body: action.params?.body,
-      mode: action.params?.mode,
-    });
+    const title = action.params?.title ?? 'SceneLens 通知';
+    const body = action.params?.body ?? `通知动作: ${action.action}`;
+    await notificationManager.showSystemNotification(title, body);
   }
 
   /**

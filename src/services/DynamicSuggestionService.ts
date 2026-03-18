@@ -14,9 +14,23 @@ import type {
   SystemAdjustment,
   AppLaunch,
 } from '../types';
-import { feedbackLogger, FeedbackStats } from '../reflection/FeedbackLogger';
-import { weightAdjuster } from '../reflection/WeightAdjuster';
+import { feedbackLogger, FeedbackLogger, FeedbackStats } from '../reflection/FeedbackLogger';
+import { weightAdjuster, WeightAdjuster } from '../reflection/WeightAdjuster';
 import { storageManager } from '../stores/storageManager';
+
+interface DynamicSuggestionDependencies {
+  feedbackLogger: Pick<FeedbackLogger, 'initialize' | 'getStats'>;
+  weightAdjuster: Pick<WeightAdjuster, 'initialize' | 'getWeight'>;
+  storage: Pick<typeof storageManager, 'getString' | 'set'>;
+  logger: Pick<Console, 'log' | 'warn' | 'error'>;
+}
+
+const defaultDependencies: DynamicSuggestionDependencies = {
+  feedbackLogger,
+  weightAdjuster,
+  storage: storageManager,
+  logger: console,
+};
 
 /**
  * 时间段类型
@@ -249,9 +263,16 @@ const SUGGESTION_VARIANTS: Record<SceneType, {
 /**
  * DynamicSuggestionService 类
  */
-class DynamicSuggestionServiceClass {
+export class DynamicSuggestionService {
   private appUsageHistory: Map<string, AppUsageRecord> = new Map();
+  private appUsageHistoryLoaded = false;
   private initialized = false;
+  private historyLoadingPromise: Promise<void> | null = null;
+  private initializationPromise: Promise<void> | null = null;
+
+  constructor(
+    private readonly dependencies: DynamicSuggestionDependencies = defaultDependencies
+  ) {}
 
   /**
    * 初始化服务
@@ -259,12 +280,46 @@ class DynamicSuggestionServiceClass {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    await this.loadAppUsageHistory();
-    await feedbackLogger.initialize();
-    await weightAdjuster.initialize();
+    if (this.initializationPromise) {
+      await this.initializationPromise;
+      return;
+    }
+
+    this.initializationPromise = this.performInitialize();
+
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
+    }
+
+  }
+
+  private async performInitialize(): Promise<void> {
+    await this.ensureAppUsageHistoryLoaded();
+    await this.dependencies.feedbackLogger.initialize();
+    await this.dependencies.weightAdjuster.initialize();
 
     this.initialized = true;
-    console.log('[DynamicSuggestionService] 初始化完成');
+    this.dependencies.logger.log('[DynamicSuggestionService] initialize complete');
+  }
+
+  private async ensureAppUsageHistoryLoaded(): Promise<void> {
+    if (this.appUsageHistoryLoaded) return;
+
+    if (this.historyLoadingPromise) {
+      await this.historyLoadingPromise;
+      return;
+    }
+
+    this.historyLoadingPromise = this.loadAppUsageHistory();
+
+    try {
+      await this.historyLoadingPromise;
+      this.appUsageHistoryLoaded = true;
+    } finally {
+      this.historyLoadingPromise = null;
+    }
   }
 
   /**
@@ -315,8 +370,8 @@ class DynamicSuggestionServiceClass {
     await this.initialize();
 
     const context = this.getTimeContext();
-    const feedbackStats = feedbackLogger.getStats(sceneType);
-    const sceneWeight = weightAdjuster.getWeight(sceneType);
+    const feedbackStats = this.dependencies.feedbackLogger.getStats(sceneType);
+    const sceneWeight = this.dependencies.weightAdjuster.getWeight(sceneType);
 
     // 生成动态系统调整
     const dynamicSystemAdjustments = this.enhanceSystemAdjustments(
@@ -559,6 +614,8 @@ class DynamicSuggestionServiceClass {
    * 记录应用使用
    */
   async recordAppUsage(intentType: string, packageName: string): Promise<void> {
+    await this.ensureAppUsageHistoryLoaded();
+
     const key = intentType || packageName;
     const existing = this.appUsageHistory.get(key) || {
       packageName,
@@ -583,13 +640,14 @@ class DynamicSuggestionServiceClass {
    */
   private async loadAppUsageHistory(): Promise<void> {
     try {
-      const data = storageManager['storage'].getString(STORAGE_KEYS.APP_USAGE_HISTORY);
+      const data = this.dependencies.storage.getString(STORAGE_KEYS.APP_USAGE_HISTORY);
       if (data) {
         const parsed = JSON.parse(data) as Array<[string, AppUsageRecord]>;
         this.appUsageHistory = new Map(parsed);
       }
     } catch (error) {
-      console.warn('[DynamicSuggestionService] 加载应用使用历史失败:', error);
+      this.appUsageHistory = new Map();
+      this.dependencies.logger.warn('[DynamicSuggestionService] 加载应用使用历史失败:', error);
     }
   }
 
@@ -599,9 +657,9 @@ class DynamicSuggestionServiceClass {
   private async saveAppUsageHistory(): Promise<void> {
     try {
       const data = JSON.stringify(Array.from(this.appUsageHistory.entries()));
-      storageManager['storage'].set(STORAGE_KEYS.APP_USAGE_HISTORY, data);
+      this.dependencies.storage.set(STORAGE_KEYS.APP_USAGE_HISTORY, data);
     } catch (error) {
-      console.error('[DynamicSuggestionService] 保存应用使用历史失败:', error);
+      this.dependencies.logger.error('[DynamicSuggestionService] 保存应用使用历史失败:', error);
     }
   }
 
@@ -627,5 +685,5 @@ class DynamicSuggestionServiceClass {
 }
 
 // 导出单例
-export const dynamicSuggestionService = new DynamicSuggestionServiceClass();
+export const dynamicSuggestionService = new DynamicSuggestionService();
 export default dynamicSuggestionService;

@@ -12,12 +12,32 @@ import { RuleEngine } from '../../rules/RuleEngine';
 import { SceneExecutor } from '../../executors/SceneExecutor';
 import { appDiscoveryEngine } from '../../discovery/AppDiscoveryEngine';
 import sceneBridge from '../../core/SceneBridge';
+import { SystemSettingsController } from '../../automation/SystemSettingsController';
 import type { CalendarEvent, SilentContext, MatchedRule } from '../../types';
 
+const RealDate = Date;
+
+function setMockTime(isoTime: string): void {
+  const fixedDate = new RealDate(isoTime);
+
+  global.Date = class extends RealDate {
+    constructor(value?: string | number | Date) {
+      if (typeof value !== 'undefined') {
+        super(value instanceof RealDate ? value.getTime() : value);
+      } else {
+        super(fixedDate.getTime());
+      }
+    }
+
+    static now() {
+      return fixedDate.getTime();
+    }
+  } as DateConstructor;
+}
+
 // Mock SceneBridge for testing
-jest.mock('../../core/SceneBridge', () => ({
-  __esModule: true,
-  default: {
+jest.mock('../../core/SceneBridge', () => {
+  const mock = {
     getCurrentLocation: jest.fn(),
     getConnectedWiFi: jest.fn(),
     getMotionState: jest.fn(),
@@ -25,10 +45,27 @@ jest.mock('../../core/SceneBridge', () => ({
     getUpcomingEvents: jest.fn(),
     setDoNotDisturb: jest.fn(),
     openAppWithDeepLink: jest.fn(),
+    hasLocationPermission: jest.fn(),
+    hasUsageStatsPermission: jest.fn(),
     hasCalendarPermission: jest.fn(),
     requestCalendarPermission: jest.fn(),
-    getInstalledApps: jest.fn().mockResolvedValue([]),
-    getUsageStats: jest.fn().mockResolvedValue([]),
+    getInstalledApps: jest.fn(),
+    getUsageStats: jest.fn(),
+    getBatteryStatus: jest.fn(),
+    isScreenOn: jest.fn(),
+  };
+
+  return {
+    __esModule: true,
+    default: mock,
+    sceneBridge: mock,
+  };
+});
+
+jest.mock('../../stores/geoFenceManager', () => ({
+  geoFenceManager: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    getAllGeoFences: jest.fn().mockReturnValue([]),
   },
 }));
 
@@ -40,11 +77,43 @@ jest.mock('../../notifications/NotificationManager', () => ({
   },
 }));
 
+jest.mock('../../automation/SystemSettingsController', () => ({
+  SystemSettingsController: {
+    setDoNotDisturb: jest.fn(() => Promise.resolve(true)),
+    setBrightness: jest.fn(() => Promise.resolve(true)),
+    setVolume: jest.fn(() => Promise.resolve(true)),
+  },
+}));
+
 describe('Meeting Scene Integration', () => {
   let ruleEngine: RuleEngine;
   let sceneExecutor: SceneExecutor;
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+    global.Date = RealDate;
+    silentContextEngine.clearConfiguration();
+    silentContextEngine.clearCache();
+    (sceneBridge.hasLocationPermission as jest.Mock).mockResolvedValue(false);
+    (sceneBridge.hasUsageStatsPermission as jest.Mock).mockResolvedValue(false);
+    (sceneBridge.hasCalendarPermission as jest.Mock).mockResolvedValue(false);
+    (sceneBridge.requestCalendarPermission as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.getCurrentLocation as jest.Mock).mockResolvedValue(null);
+    (sceneBridge.getConnectedWiFi as jest.Mock).mockResolvedValue(null);
+    (sceneBridge.getMotionState as jest.Mock).mockResolvedValue('STILL');
+    (sceneBridge.getForegroundApp as jest.Mock).mockResolvedValue('');
+    (sceneBridge.getUpcomingEvents as jest.Mock).mockResolvedValue([]);
+    (sceneBridge.getInstalledApps as jest.Mock).mockResolvedValue([]);
+    (sceneBridge.getUsageStats as jest.Mock).mockResolvedValue([]);
+    (sceneBridge.getBatteryStatus as jest.Mock).mockResolvedValue({
+      isCharging: false,
+      isFull: false,
+      batteryLevel: 80,
+    });
+    (sceneBridge.isScreenOn as jest.Mock).mockResolvedValue(true);
+    (SystemSettingsController.setDoNotDisturb as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.openAppWithDeepLink as jest.Mock).mockResolvedValue(true);
+
     // Initialize components
     ruleEngine = new RuleEngine();
     sceneExecutor = new SceneExecutor();
@@ -54,14 +123,18 @@ describe('Meeting Scene Integration', () => {
     
     // Initialize app discovery
     await appDiscoveryEngine.initialize();
+  });
 
-    // Reset mocks
-    jest.clearAllMocks();
+  afterEach(() => {
+    global.Date = RealDate;
+    silentContextEngine.clearConfiguration();
+    silentContextEngine.clearCache();
   });
 
   describe('Calendar Signal Generation', () => {
-    it('should generate UPCOMING_MEETING signal when meeting is within 30 minutes', async () => {
+    it('should generate a meeting calendar signal when meeting is within 30 minutes', async () => {
       // Mock upcoming meeting
+      setMockTime('2024-01-15T10:30:00');
       const now = Date.now();
       const meetingStart = now + 15 * 60 * 1000; // 15 minutes from now
       const meetingEnd = meetingStart + 60 * 60 * 1000; // 1 hour duration
@@ -69,7 +142,7 @@ describe('Meeting Scene Integration', () => {
       const mockEvents: CalendarEvent[] = [
         {
           id: 'meeting-1',
-          title: 'Team Standup',
+          title: 'Team Standup Meeting',
           startTime: meetingStart,
           endTime: meetingEnd,
           location: 'Conference Room A',
@@ -78,6 +151,8 @@ describe('Meeting Scene Integration', () => {
       ];
 
       (sceneBridge.getUpcomingEvents as jest.Mock).mockResolvedValue(mockEvents);
+      (sceneBridge.hasCalendarPermission as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.hasLocationPermission as jest.Mock).mockResolvedValue(true);
 
       // Mock other signals for office context
       (sceneBridge.getCurrentLocation as jest.Mock).mockResolvedValue({
@@ -97,53 +172,31 @@ describe('Meeting Scene Integration', () => {
         },
       });
 
-      // Mock workday and work hours - use current time for now calculation
-      const originalDate = Date;
-      const originalNow = Date.now;
-      const mockDate = new Date('2024-01-15T10:30:00Z'); // Monday 10:30 AM
-      global.Date = jest.fn(() => mockDate) as any;
-      global.Date.now = jest.fn(() => now); // Use the same now value for consistency
-
       const context = await silentContextEngine.getContext();
-
-      // Restore Date
-      global.Date = originalDate;
-      global.Date.now = originalNow;
 
       // Verify calendar signal
       const calendarSignal = context.signals.find(s => s.type === 'CALENDAR');
       expect(calendarSignal).toBeDefined();
-      expect(calendarSignal?.value).toBe('UPCOMING_MEETING');
+      expect(calendarSignal?.value).toBe('MEETING_IMMINENT');
       expect(calendarSignal?.weight).toBeGreaterThan(0.8);
 
       console.log('✅ Test 1 passed: Calendar signal generated for upcoming meeting');
       console.log(`   Signal: ${calendarSignal?.type}=${calendarSignal?.value} (weight: ${calendarSignal?.weight})`);
     });
 
-    it('should generate NO_EVENTS signal when no meetings are scheduled', async () => {
+    it('should omit the calendar signal when no meetings are scheduled', async () => {
       // Clear cache to reset from previous test
       silentContextEngine.clearCache();
 
       // Reset mock to return empty array
-      (sceneBridge.getUpcomingEvents as jest.Mock).mockReset().mockResolvedValue([]);
-
-      // Mock workday
-      const originalDate = Date;
-      const originalNow = Date.now;
-      const now = Date.now();
-      const mockDate = new Date('2024-01-15T10:30:00Z'); // Monday 10:30 AM
-      global.Date = jest.fn(() => mockDate) as any;
-      global.Date.now = jest.fn(() => now);
+      setMockTime('2024-01-15T10:30:00');
+      (sceneBridge.getUpcomingEvents as jest.Mock).mockResolvedValue([]);
+      (sceneBridge.hasCalendarPermission as jest.Mock).mockResolvedValue(true);
 
       const context = await silentContextEngine.getContext();
 
-      // Restore Date
-      global.Date = originalDate;
-      global.Date.now = originalNow;
-
       const calendarSignal = context.signals.find(s => s.type === 'CALENDAR');
-      expect(calendarSignal).toBeDefined();
-      expect(calendarSignal?.value).toBe('NO_EVENTS');
+      expect(calendarSignal).toBeUndefined();
 
       console.log('✅ Test 2 passed: Calendar signal generated for no events');
       console.log(`   Signal: ${calendarSignal?.type}=${calendarSignal?.value} (weight: ${calendarSignal?.weight})`);
@@ -154,6 +207,8 @@ describe('Meeting Scene Integration', () => {
     it('should recognize OFFICE scene with high confidence during meeting time', async () => {
       // Clear cache to reset from previous test
       silentContextEngine.clearCache();
+      silentContextEngine.clearConfiguration();
+      setMockTime('2024-01-15T10:30:00');
 
       // Mock meeting context
       const now = Date.now();
@@ -162,20 +217,22 @@ describe('Meeting Scene Integration', () => {
       const mockEvents: CalendarEvent[] = [
         {
           id: 'meeting-1',
-          title: 'Project Review',
+          title: 'Project Review Meeting',
           startTime: meetingStart,
           endTime: meetingStart + 60 * 60 * 1000,
         },
       ];
 
-      (sceneBridge.getUpcomingEvents as jest.Mock).mockReset().mockResolvedValue(mockEvents);
-      (sceneBridge.getCurrentLocation as jest.Mock).mockReset().mockResolvedValue({
+      (sceneBridge.getUpcomingEvents as jest.Mock).mockResolvedValue(mockEvents);
+      (sceneBridge.hasCalendarPermission as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.hasLocationPermission as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.getCurrentLocation as jest.Mock).mockResolvedValue({
         latitude: 39.9042,
         longitude: 116.4074,
         accuracy: 10,
         timestamp: now,
       });
-      (sceneBridge.getMotionState as jest.Mock).mockReset().mockResolvedValue('STILL');
+      (sceneBridge.getMotionState as jest.Mock).mockResolvedValue('STILL');
 
       // Configure office geofence
       silentContextEngine.setGeoFences({
@@ -192,10 +249,10 @@ describe('Meeting Scene Integration', () => {
       expect(context.confidence).toBeGreaterThan(0.5);
 
       // Verify key signals
-      const workdaySignal = context.signals.find(s => s.type === 'TIME' && s.value === 'WORKDAY');
+      const workdaySignal = context.signals.find(s => s.type === 'TIME' && s.value === 'MORNING_WEEKDAY');
       const locationSignal = context.signals.find(s => s.type === 'LOCATION' && s.value === 'OFFICE');
       const motionSignal = context.signals.find(s => s.type === 'MOTION' && s.value === 'STILL');
-      const calendarSignal = context.signals.find(s => s.type === 'CALENDAR' && s.value === 'UPCOMING_MEETING');
+      const calendarSignal = context.signals.find(s => s.type === 'CALENDAR' && s.value === 'MEETING_IMMINENT');
 
       expect(workdaySignal).toBeDefined();
       expect(locationSignal).toBeDefined();
@@ -216,11 +273,10 @@ describe('Meeting Scene Integration', () => {
         context: 'OFFICE',
         confidence: 0.85,
         signals: [
-          { type: 'TIME', value: 'WORKDAY', weight: 0.8, timestamp: Date.now() },
-          { type: 'TIME', value: 'WORK_HOURS', weight: 0.6, timestamp: Date.now() },
+          { type: 'TIME', value: 'MORNING_WEEKDAY', weight: 0.8, timestamp: Date.now() },
           { type: 'LOCATION', value: 'OFFICE', weight: 0.8, timestamp: Date.now() },
           { type: 'MOTION', value: 'STILL', weight: 0.4, timestamp: Date.now() },
-          { type: 'CALENDAR', value: 'UPCOMING_MEETING', weight: 0.9, timestamp: Date.now() },
+          { type: 'CALENDAR', value: 'MEETING_IMMINENT', weight: 0.9, timestamp: Date.now() },
         ],
       };
 
@@ -241,11 +297,8 @@ describe('Meeting Scene Integration', () => {
   describe('Meeting Actions Execution', () => {
     it('should execute meeting actions successfully', async () => {
       // Mock successful action execution
-      (sceneBridge.setDoNotDisturb as jest.Mock).mockReset().mockResolvedValue({
-        enabled: true,
-        mode: 'PRIORITY',
-      });
-      (sceneBridge.openAppWithDeepLink as jest.Mock).mockReset().mockResolvedValue(true);
+      (SystemSettingsController.setDoNotDisturb as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.openAppWithDeepLink as jest.Mock).mockResolvedValue(true);
 
       // Get meeting rule
       const rules = ruleEngine.getRules();
@@ -266,6 +319,7 @@ describe('Meeting Scene Integration', () => {
 
       expect(dndAction?.success).toBe(true);
       expect(calendarAction?.success).toBe(true);
+      expect(SystemSettingsController.setDoNotDisturb).toHaveBeenCalled();
 
       console.log('✅ Test 5 passed: Meeting actions executed successfully');
       console.log(`   Actions executed: ${results.length}`);
@@ -284,6 +338,8 @@ describe('Meeting Scene Integration', () => {
 
       // Clear cache to reset from previous test
       silentContextEngine.clearCache();
+      silentContextEngine.clearConfiguration();
+      setMockTime('2024-01-15T10:30:00');
 
       // Mock meeting scenario
       const now = Date.now();
@@ -299,8 +355,10 @@ describe('Meeting Scene Integration', () => {
         },
       ];
 
-      (sceneBridge.getUpcomingEvents as jest.Mock).mockReset().mockResolvedValue(mockEvents);
-      (sceneBridge.getCurrentLocation as jest.Mock).mockReset().mockResolvedValue({
+      (sceneBridge.getUpcomingEvents as jest.Mock).mockResolvedValue(mockEvents);
+      (sceneBridge.hasCalendarPermission as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.hasLocationPermission as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.getCurrentLocation as jest.Mock).mockResolvedValue({
         latitude: 39.9042,
         longitude: 116.4074,
         accuracy: 15,
@@ -346,11 +404,8 @@ describe('Meeting Scene Integration', () => {
       console.log('\n⚡ Step 4: Executing meeting actions...');
 
       // Mock successful execution
-      (sceneBridge.setDoNotDisturb as jest.Mock).mockReset().mockResolvedValue({
-        enabled: true,
-        mode: 'PRIORITY',
-      });
-      (sceneBridge.openAppWithDeepLink as jest.Mock).mockReset().mockResolvedValue(true);
+      (SystemSettingsController.setDoNotDisturb as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.openAppWithDeepLink as jest.Mock).mockResolvedValue(true);
 
       const results = await sceneExecutor.execute(meetingRule!.rule.actions);
       const successCount = results.filter(r => r.success).length;
@@ -368,6 +423,7 @@ describe('Meeting Scene Integration', () => {
       
       expect(dndResult?.success).toBe(true);
       expect(calendarResult?.success).toBe(true);
+      expect(SystemSettingsController.setDoNotDisturb).toHaveBeenCalled();
       
       console.log('   ✓ Do Not Disturb enabled');
       console.log('   ✓ Calendar app opened');

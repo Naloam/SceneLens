@@ -267,12 +267,14 @@ export class RuleEngine {
 
     // 时间信号的特殊处理：支持前缀匹配
     if (condition.type === 'time') {
-      const signalPeriod = signal.value.split('_')[0]; // 提取时间段部分
-      const conditionPeriod = condition.value.split('_')[0];
+      const normalizeTimeValue = (value: string) =>
+        value.replace(/_(WEEKDAY|WEEKEND)$/, '');
+      const signalPeriod = normalizeTimeValue(signal.value);
+      const conditionPeriod = normalizeTimeValue(condition.value);
 
       // 如果时间段相同，就认为匹配（不管是否 WEEKDAY/WEEKEND）
       if (signalPeriod === conditionPeriod) {
-        console.log(`[RuleEngine] Time prefix match: ${signal.value} matches ${condition.value}`);
+        console.log(`[RuleEngine] Time period match: ${signal.value} matches ${condition.value}`);
         return true;
       }
     }

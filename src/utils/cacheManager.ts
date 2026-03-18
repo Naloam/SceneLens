@@ -232,9 +232,18 @@ export class CacheManager<K = string> {
       return;
     }
 
+    if (process.env.NODE_ENV === 'test') {
+      return;
+    }
+
     this.cleanupTimer = setInterval(() => {
       this.cleanup();
     }, this.config.cleanupInterval);
+
+    // Do not keep the Node.js event loop alive just for cache cleanup.
+    if (typeof this.cleanupTimer.unref === 'function') {
+      this.cleanupTimer.unref();
+    }
   }
 
   /**

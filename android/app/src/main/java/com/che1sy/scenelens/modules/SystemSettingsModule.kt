@@ -20,6 +20,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.ReadableType
 import com.facebook.react.module.annotations.ReactModule
 
 /**
@@ -53,6 +54,51 @@ class SystemSettingsModule(private val ctx: ReactApplicationContext) : ReactCont
         return true
     }
 
+    private fun resolveVolumeStream(streamType: String): Int? =
+        when (streamType.lowercase()) {
+            "media" -> AudioManager.STREAM_MUSIC
+            "ring" -> AudioManager.STREAM_RING
+            "notification" -> AudioManager.STREAM_NOTIFICATION
+            "alarm" -> AudioManager.STREAM_ALARM
+            "system" -> AudioManager.STREAM_SYSTEM
+            else -> null
+        }
+
+    private fun getMinVolume(audioManager: AudioManager, stream: Int): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) audioManager.getStreamMinVolume(stream) else 0
+
+    private fun toVolumePercent(audioManager: AudioManager, stream: Int, currentVolume: Int): Int {
+        val maxVolume = audioManager.getStreamMaxVolume(stream)
+        val minVolume = getMinVolume(audioManager, stream)
+        return if (maxVolume > minVolume) {
+            ((currentVolume - minVolume) * 100 / (maxVolume - minVolume)).coerceIn(0, 100)
+        } else {
+            0
+        }
+    }
+
+    private fun toTargetVolume(audioManager: AudioManager, stream: Int, level: Int): Int {
+        val maxVolume = audioManager.getStreamMaxVolume(stream)
+        val minVolume = getMinVolume(audioManager, stream)
+        val clampedLevel = level.coerceIn(0, 100)
+        return minVolume + (clampedLevel * (maxVolume - minVolume) / 100)
+    }
+
+    private fun parseDoNotDisturbSetting(settings: ReadableMap): Pair<Boolean, String>? {
+        return when (settings.getType("doNotDisturb")) {
+            ReadableType.Boolean -> Pair(settings.getBoolean("doNotDisturb"), "none")
+            ReadableType.String -> {
+                val rawMode = settings.getString("doNotDisturb")?.lowercase() ?: return null
+                when (rawMode) {
+                    "all" -> Pair(false, "all")
+                    "priority", "alarms", "none" -> Pair(true, rawMode)
+                    else -> Pair(true, "none")
+                }
+            }
+            else -> null
+        }
+    }
+
     // ==================== 音量控制 ====================
 
     /**
@@ -64,30 +110,42 @@ class SystemSettingsModule(private val ctx: ReactApplicationContext) : ReactCont
     fun setVolume(streamType: String, level: Int, promise: Promise) {
         try {
             val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            
-            val stream = when (streamType.lowercase()) {
-                "media" -> AudioManager.STREAM_MUSIC
-                "ring" -> AudioManager.STREAM_RING
-                "notification" -> AudioManager.STREAM_NOTIFICATION
-                "alarm" -> AudioManager.STREAM_ALARM
-                "system" -> AudioManager.STREAM_SYSTEM
-                else -> {
-                    promise.reject("ERR_INVALID_STREAM", "Invalid stream type: $streamType")
-                    return
+
+            if (audioManager.isVolumeFixed) {
+                val result = Arguments.createMap().apply {
+                    putString("streamType", streamType)
+                    putInt("level", 0)
+                    putInt("actualVolume", 0)
+                    putInt("maxVolume", 0)
+                    putBoolean("success", false)
+                    putString("error", "VOLUME_FIXED")
                 }
+                promise.resolve(result)
+                return
             }
-            
+
+            val stream = resolveVolumeStream(streamType) ?: run {
+                promise.reject("ERR_INVALID_STREAM", "Invalid stream type: $streamType")
+                return
+            }
+
             val maxVolume = audioManager.getStreamMaxVolume(stream)
-            val targetVolume = (level.coerceIn(0, 100) * maxVolume / 100)
-            
+            val minVolume = getMinVolume(audioManager, stream)
+            val clampedLevel = level.coerceIn(0, 100)
+            val targetVolume = toTargetVolume(audioManager, stream, clampedLevel)
+
             audioManager.setStreamVolume(stream, targetVolume, 0)
-            
-            Log.d(LOG_TAG, "Set $streamType volume to $level% ($targetVolume/$maxVolume)")
-            
+            val actualVolume = audioManager.getStreamVolume(stream)
+            val actualPercent = toVolumePercent(audioManager, stream, actualVolume)
+
+            Log.d(LOG_TAG, "Set $streamType volume to $clampedLevel% ($actualVolume/$maxVolume, min=$minVolume)")
+
             val result = Arguments.createMap().apply {
                 putString("streamType", streamType)
-                putInt("level", level)
-                putInt("actualVolume", targetVolume)
+                putInt("level", actualPercent)
+                putInt("requestedLevel", clampedLevel)
+                putInt("actualVolume", actualVolume)
+                putInt("minVolume", minVolume)
                 putInt("maxVolume", maxVolume)
                 putBoolean("success", true)
             }
@@ -107,26 +165,21 @@ class SystemSettingsModule(private val ctx: ReactApplicationContext) : ReactCont
         try {
             val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             
-            val stream = when (streamType.lowercase()) {
-                "media" -> AudioManager.STREAM_MUSIC
-                "ring" -> AudioManager.STREAM_RING
-                "notification" -> AudioManager.STREAM_NOTIFICATION
-                "alarm" -> AudioManager.STREAM_ALARM
-                "system" -> AudioManager.STREAM_SYSTEM
-                else -> {
-                    promise.reject("ERR_INVALID_STREAM", "Invalid stream type: $streamType")
-                    return
-                }
+            val stream = resolveVolumeStream(streamType) ?: run {
+                promise.reject("ERR_INVALID_STREAM", "Invalid stream type: $streamType")
+                return
             }
             
             val currentVolume = audioManager.getStreamVolume(stream)
             val maxVolume = audioManager.getStreamMaxVolume(stream)
-            val level = if (maxVolume > 0) (currentVolume * 100 / maxVolume) else 0
-            
+            val minVolume = getMinVolume(audioManager, stream)
+            val level = toVolumePercent(audioManager, stream, currentVolume)
+
             val result = Arguments.createMap().apply {
                 putString("streamType", streamType)
                 putInt("level", level)
                 putInt("currentVolume", currentVolume)
+                putInt("minVolume", minVolume)
                 putInt("maxVolume", maxVolume)
             }
             promise.resolve(result)
@@ -156,12 +209,15 @@ class SystemSettingsModule(private val ctx: ReactApplicationContext) : ReactCont
             for ((name, stream) in streams) {
                 val currentVolume = audioManager.getStreamVolume(stream)
                 val maxVolume = audioManager.getStreamMaxVolume(stream)
-                val level = if (maxVolume > 0) (currentVolume * 100 / maxVolume) else 0
+                val minVolume = getMinVolume(audioManager, stream)
+                val level = toVolumePercent(audioManager, stream, currentVolume)
                 
                 val volumeInfo = Arguments.createMap().apply {
                     putInt("level", level)
                     putInt("current", currentVolume)
+                    putInt("min", minVolume)
                     putInt("max", maxVolume)
+                    putBoolean("isFixed", audioManager.isVolumeFixed)
                 }
                 result.putMap(name, volumeInfo)
             }
@@ -675,6 +731,30 @@ class SystemSettingsModule(private val ctx: ReactApplicationContext) : ReactCont
      * 检查蓝牙连接权限 (Android 12+)
      */
     @ReactMethod
+    fun openNotificationSettings(promise: Promise) {
+        try {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                }
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = android.net.Uri.parse("package:" + ctx.packageName)
+                }
+            }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+            ctx.startActivity(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            Log.e(LOG_TAG, "Failed to open notification settings: ${e.message}", e)
+            promise.reject("ERR_OPEN_NOTIFICATION_SETTINGS", e.message, e)
+        }
+    }
+
+    /**
+     * 妫€鏌ヨ摑鐗欒繛鎺ユ潈闄?(Android 12+)
+     */
+    @ReactMethod
     fun checkBluetoothPermission(promise: Promise) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             promise.resolve(permissionGranted(Manifest.permission.BLUETOOTH_CONNECT))
@@ -723,24 +803,34 @@ class SystemSettingsModule(private val ctx: ReactApplicationContext) : ReactCont
                         "media" to AudioManager.STREAM_MUSIC,
                         "ring" to AudioManager.STREAM_RING,
                         "notification" to AudioManager.STREAM_NOTIFICATION,
-                        "alarm" to AudioManager.STREAM_ALARM
+                        "alarm" to AudioManager.STREAM_ALARM,
+                        "system" to AudioManager.STREAM_SYSTEM
                     )
-                    
-                    for ((name, stream) in streamTypes) {
-                        if (volumeSettings.hasKey(name)) {
-                            try {
-                                val level = volumeSettings.getInt(name)
-                                val maxVolume = audioManager.getStreamMaxVolume(stream)
-                                val targetVolume = (level.coerceIn(0, 100) * maxVolume / 100)
-                                audioManager.setStreamVolume(stream, targetVolume, 0)
-                                volumeResults.putBoolean(name, true)
-                            } catch (e: Exception) {
+
+                    if (audioManager.isVolumeFixed) {
+                        for ((name, _) in streamTypes) {
+                            if (volumeSettings.hasKey(name)) {
                                 volumeResults.putBoolean(name, false)
                                 hasErrors = true
                             }
                         }
+                        results.putMap("volume", volumeResults)
+                    } else {
+                        for ((name, stream) in streamTypes) {
+                            if (volumeSettings.hasKey(name)) {
+                                try {
+                                    val level = volumeSettings.getInt(name)
+                                    val targetVolume = toTargetVolume(audioManager, stream, level)
+                                    audioManager.setStreamVolume(stream, targetVolume, 0)
+                                    volumeResults.putBoolean(name, true)
+                                } catch (e: Exception) {
+                                    volumeResults.putBoolean(name, false)
+                                    hasErrors = true
+                                }
+                            }
+                        }
+                        results.putMap("volume", volumeResults)
                     }
-                    results.putMap("volume", volumeResults)
                 }
             }
             
@@ -783,12 +873,7 @@ class SystemSettingsModule(private val ctx: ReactApplicationContext) : ReactCont
                 
                 if (nm.isNotificationPolicyAccessGranted) {
                     try {
-                        val dndValue = settings.getDynamic("doNotDisturb")
-                        val (enabled, mode) = when {
-                            dndValue is Boolean -> Pair(dndValue, "none")
-                            dndValue is String -> Pair(true, dndValue)
-                            else -> Pair(false, "all")
-                        }
+                        val (enabled, mode) = parseDoNotDisturbSetting(settings) ?: Pair(false, "all")
                         
                         val filter = if (enabled) {
                             when (mode.lowercase()) {
@@ -867,12 +952,12 @@ class SystemSettingsModule(private val ctx: ReactApplicationContext) : ReactCont
                 "media" to AudioManager.STREAM_MUSIC,
                 "ring" to AudioManager.STREAM_RING,
                 "notification" to AudioManager.STREAM_NOTIFICATION,
-                "alarm" to AudioManager.STREAM_ALARM
+                "alarm" to AudioManager.STREAM_ALARM,
+                "system" to AudioManager.STREAM_SYSTEM
             )
             for ((name, stream) in streams) {
                 val current = audioManager.getStreamVolume(stream)
-                val max = audioManager.getStreamMaxVolume(stream)
-                volumeState.putInt(name, if (max > 0) (current * 100 / max) else 0)
+                volumeState.putInt(name, toVolumePercent(audioManager, stream, current))
             }
             result.putMap("volume", volumeState)
             

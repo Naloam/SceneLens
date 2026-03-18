@@ -705,26 +705,40 @@ export class SilentContextEngine {
       }
     }
 
-    // 计算基础置信度
-    const rawConfidence = totalEffectiveWeight > 0 ? Math.min(maxScore / totalEffectiveWeight, 1.0) : 0;
-
-    // 智能置信度调整
-    let confidence = rawConfidence;
-
-    // 根据信号质量调整置信度
-    if (strongSignalCount >= 1) {
-      // 有明确的位置/WiFi 信号，大幅提升置信度
-      confidence = Math.min(rawConfidence * 1.5, 0.95);
-    } else if (matchedConditions >= 2) {
-      // 多个信号匹配，提升置信度
-      confidence = Math.min(rawConfidence * 1.3, 0.85);
-    } else if (matchedConditions === 1) {
-      // 只有一个信号匹配（通常是时间），给予基础置信度
-      confidence = Math.max(rawConfidence * 1.2, 0.55);
+    // 计算第二高分，用于衡量与最佳场景的可分离度
+    let secondMaxScore = 0;
+    for (const [scene, score] of sceneScores) {
+      if (scene === bestScene) continue;
+      if (score > secondMaxScore) {
+        secondMaxScore = score;
+      }
     }
 
-    // 确保最低置信度为 0.5（让用户看到有意义的结果）
-    confidence = Math.max(confidence, 0.5);
+    // 基础置信度：最佳分数占有效权重比例
+    const rawConfidence = totalEffectiveWeight > 0 ? Math.min(maxScore / totalEffectiveWeight, 1.0) : 0;
+    // 证据覆盖度：有意义匹配条件占比
+    const evidenceCoverage = signals.length > 0 ? Math.min(matchedConditions / signals.length, 1.0) : 0;
+    // 可分离度：第一名与第二名拉开程度
+    const separability = maxScore > 0 ? Math.min((maxScore - secondMaxScore) / maxScore, 1.0) : 0;
+
+    // 综合置信度，避免固定值，随证据质量动态变化
+    let confidence =
+      rawConfidence * 0.6 +
+      evidenceCoverage * 0.25 +
+      separability * 0.15;
+
+    // 强信号带来稳定增益
+    if (strongSignalCount > 0) {
+      confidence += Math.min(0.1, strongSignalCount * 0.05);
+    }
+
+    // UNKNOWN 结果额外降权，避免误导性高置信
+    if (bestScene === 'UNKNOWN') {
+      confidence *= 0.65;
+    }
+
+    // 限制范围到 [0, 1]
+    confidence = Math.max(0, Math.min(confidence, 1));
 
     // 如果是 UNKNOWN 场景但有时间信号，尝试根据时间推断一个更具体的场景
     if (bestScene === 'UNKNOWN' && signalTypes.has('TIME')) {
@@ -742,7 +756,7 @@ export class SilentContextEngine {
       // 如果第二高分场景有一定得分，使用它
       if (secondMaxScore > 0) {
         bestScene = secondBestScene;
-        confidence = Math.max(confidence * 0.8, 0.5);
+        confidence = Math.max(0, Math.min(confidence * 0.8, 1));
       }
     }
 
@@ -783,6 +797,15 @@ export class SilentContextEngine {
 
       case 'FOREGROUND_APP':
         return this.appSignalToScenes(signal.value);
+
+      case 'CALENDAR':
+        return this.calendarSignalToScenes(signal.value);
+
+      case 'BATTERY':
+        return this.batterySignalToScenes(signal.value);
+
+      case 'SCREEN':
+        return this.screenSignalToScenes(signal.value);
 
       default:
         return mapping;
@@ -1041,6 +1064,85 @@ export class SilentContextEngine {
         mapping.push(['TRAVEL', 0.9]);
         break;
 
+      default:
+        mapping.push(['UNKNOWN', 0.2]);
+    }
+
+    return mapping;
+  }
+
+  /**
+   * 日历信号到场景映射
+   */
+  private calendarSignalToScenes(calendarValue: string): SignalSceneMapping {
+    const mapping: SignalSceneMapping = [];
+
+    if (calendarValue.startsWith('MEETING_')) {
+      mapping.push(['OFFICE', 0.9]);
+      mapping.push(['COMMUTE', 0.2]);
+      return mapping;
+    }
+
+    if (calendarValue.startsWith('TRAVEL_')) {
+      mapping.push(['TRAVEL', 0.9]);
+      mapping.push(['COMMUTE', 0.2]);
+      return mapping;
+    }
+
+    if (calendarValue.startsWith('GENERAL_')) {
+      mapping.push(['OFFICE', 0.4]);
+      mapping.push(['HOME', 0.3]);
+      return mapping;
+    }
+
+    mapping.push(['UNKNOWN', 0.2]);
+    return mapping;
+  }
+
+  /**
+   * 电池信号到场景映射
+   */
+  private batterySignalToScenes(batteryValue: string): SignalSceneMapping {
+    const mapping: SignalSceneMapping = [];
+
+    switch (batteryValue) {
+      case 'CHARGING_FULL':
+      case 'CHARGING':
+        mapping.push(['HOME', 0.45]);
+        mapping.push(['SLEEP', 0.25]);
+        break;
+      case 'LOW':
+        mapping.push(['COMMUTE', 0.3]);
+        mapping.push(['TRAVEL', 0.25]);
+        mapping.push(['UNKNOWN', 0.2]);
+        break;
+      case 'MEDIUM':
+      case 'HIGH':
+        mapping.push(['OFFICE', 0.2]);
+        mapping.push(['HOME', 0.2]);
+        break;
+      default:
+        mapping.push(['UNKNOWN', 0.2]);
+    }
+
+    return mapping;
+  }
+
+  /**
+   * 屏幕信号到场景映射
+   */
+  private screenSignalToScenes(screenValue: string): SignalSceneMapping {
+    const mapping: SignalSceneMapping = [];
+
+    switch (screenValue) {
+      case 'OFF':
+        mapping.push(['SLEEP', 0.55]);
+        mapping.push(['HOME', 0.25]);
+        break;
+      case 'ON':
+        mapping.push(['OFFICE', 0.2]);
+        mapping.push(['STUDY', 0.2]);
+        break;
       default:
         mapping.push(['UNKNOWN', 0.2]);
     }

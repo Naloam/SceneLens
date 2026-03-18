@@ -96,6 +96,7 @@ export interface UnifiedAnalysisResult {
  */
 class UnifiedSceneAnalyzerClass {
   private initialized = false;
+  private initializationPromise: Promise<void> | null = null;
   private smartEngineEnabled = true; // 是否使用新版智能建议引擎
 
   /**
@@ -104,22 +105,34 @@ class UnifiedSceneAnalyzerClass {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
+    if (this.initializationPromise) {
+      await this.initializationPromise;
+      return;
+    }
+
+    this.initializationPromise = this.performInitialize();
+
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
+    }
+  }
+
+  private async performInitialize(): Promise<void> {
     await dynamicSuggestionService.initialize();
-    await feedbackLogger.initialize();
-    await weightAdjuster.initialize();
-    
-    // 初始化智能建议引擎
+
     try {
       await smartSuggestionEngine.initialize();
       this.smartEngineEnabled = true;
-      console.log('[UnifiedSceneAnalyzer] SmartSuggestionEngine 初始化完成');
+      console.log('[UnifiedSceneAnalyzer] SmartSuggestionEngine initialized');
     } catch (error) {
-      console.warn('[UnifiedSceneAnalyzer] SmartSuggestionEngine 初始化失败，使用旧版:', error);
+      console.warn('[UnifiedSceneAnalyzer] SmartSuggestionEngine init failed, fallback to legacy flow:', error);
       this.smartEngineEnabled = false;
     }
 
     this.initialized = true;
-    console.log('[UnifiedSceneAnalyzer] 初始化完成');
+    console.log('[UnifiedSceneAnalyzer] Initialized');
   }
 
   /**
@@ -480,6 +493,8 @@ class UnifiedSceneAnalyzerClass {
     result: UnifiedAnalysisResult,
     action: 'accept' | 'ignore' | 'cancel'
   ): Promise<void> {
+    await dynamicSuggestionService.initialize();
+
     // 直接使用 action，因为 UserFeedback 类型就是 'accept' | 'ignore' | 'cancel'
     await feedbackLogger.logFeedback(
       result.sceneType,

@@ -17,9 +17,14 @@ import { UserTriggeredAnalyzer } from '../core/UserTriggeredAnalyzer';
 import { unifiedSceneAnalyzer, UnifiedAnalysisResult } from '../core/UnifiedSceneAnalyzer';
 import { predictiveTrigger } from '../core/PredictiveTrigger';
 import { sceneBridge } from '../core/SceneBridge';
+import { SystemSettingsController } from '../automation/SystemSettingsController';
+import { resolveDoNotDisturbSettings } from '../automation/systemSettingTransforms';
+import type { VolumeStreamType } from '../types/automation';
+import { appDiscoveryEngine } from '../discovery/AppDiscoveryEngine';
+import { personalizationManager } from '../services/suggestion/PersonalizationManager';
 import { useSceneStore, useMLStatsStore } from '../stores';
 import { useShallow } from 'zustand/react/shallow';
-import type { TriggeredContext, SceneType } from '../types';
+import type { TriggeredContext, SceneType, AppCategory } from '../types';
 import type { SmartSuggestion, SmartAction } from '../services/suggestion';
 
 // 单例分析器实例
@@ -35,6 +40,70 @@ const SCENE_DISPLAY_NAMES: Record<SceneType, string> = {
   TRAVEL: '出行模式',
   UNKNOWN: '未知场景',
 };
+
+const APP_CATEGORY_INTENT: Record<AppCategory, string | null> = {
+  TRANSIT_APP: 'TRANSIT_APP_TOP1',
+  MUSIC_PLAYER: 'MUSIC_PLAYER_TOP1',
+  PAYMENT_APP: 'PAYMENT_APP_TOP1',
+  MEETING_APP: 'MEETING_APP_TOP1',
+  STUDY_APP: 'STUDY_APP_TOP1',
+  SMART_HOME: 'SMART_HOME_TOP1',
+  CALENDAR: 'CALENDAR_TOP1',
+  OTHER: null,
+};
+
+const APP_CATEGORY_FALLBACK_PACKAGE: Record<AppCategory, string | null> = {
+  TRANSIT_APP: 'com.eg.android.AlipayGphone',
+  MUSIC_PLAYER: 'com.netease.cloudmusic',
+  PAYMENT_APP: 'com.eg.android.AlipayGphone',
+  MEETING_APP: 'com.tencent.wework',
+  STUDY_APP: 'com.chaoxing.mobile',
+  SMART_HOME: 'com.xiaomi.smarthome',
+  CALENDAR: 'com.android.calendar',
+  OTHER: null,
+};
+
+async function resolvePackageByCategory(category: AppCategory): Promise<string | null> {
+  const intent = APP_CATEGORY_INTENT[category];
+
+  try {
+    if (!appDiscoveryEngine.isInitialized()) {
+      await appDiscoveryEngine.initialize();
+    }
+    if (intent) {
+      const resolved = appDiscoveryEngine.resolveIntent(intent);
+      if (resolved) return resolved;
+    }
+  } catch (error) {
+    console.warn('[useUserTriggeredAnalysis] App discovery resolve failed:', error);
+  }
+
+  return APP_CATEGORY_FALLBACK_PACKAGE[category] ?? null;
+}
+
+async function launchAppByCategory(category: AppCategory): Promise<boolean> {
+  const packageName = await resolvePackageByCategory(category);
+  if (!packageName) return false;
+
+  const isInstalled = await sceneBridge.isAppInstalled(packageName);
+  if (!isInstalled) return false;
+
+  return sceneBridge.openAppWithDeepLink(packageName, undefined);
+}
+
+function resolveVolumeParams(params: Record<string, any> | undefined): { streamType: VolumeStreamType; levelPercent: number } {
+  const rawLevel = typeof params?.level === 'number' ? params.level : 50;
+  const levelPercent = rawLevel <= 1 ? Math.round(rawLevel * 100) : Math.round(rawLevel);
+  const rawStream = typeof params?.streamType === 'string' ? params.streamType.toLowerCase() : 'media';
+  const streamType: VolumeStreamType = ['media', 'ring', 'notification', 'alarm', 'system'].includes(rawStream)
+    ? (rawStream as VolumeStreamType)
+    : 'media';
+
+  return {
+    streamType,
+    levelPercent: Math.max(0, Math.min(100, levelPercent)),
+  };
+}
 
 /**
  * 格式化智能建议消息
@@ -70,14 +139,34 @@ async function executeSmartAction(action: SmartAction): Promise<{ success: boole
     if (action.type === 'system' && action.action) {
       console.log(`[useUserTriggeredAnalysis] 执行系统动作: ${action.action}`, action.params);
       
+      if (action.action === 'setDoNotDisturb') {
+        const { enabled, mode } = resolveDoNotDisturbSettings(action.params);
+        const success = await SystemSettingsController.setDoNotDisturb(enabled, mode);
+        if (!success) {
+          return { success: false, error: `鍕挎壈妯″紡璁剧疆澶辫触: enabled=${enabled}, mode=${mode}` };
+        }
+        console.log(`[useUserTriggeredAnalysis] 勿扰模式已${enabled ? '开启' : '关闭'} (${mode})`);
+        return { success: true };
+      }
+
+      if (action.action === 'setBrightness') {
+        const level = action.params?.level ?? 0.5;
+        const success = await SystemSettingsController.setBrightness(level);
+        if (!success) {
+          return { success: false, error: `浜害璁剧疆澶辫触: ${level}` };
+        }
+        console.log(`[useUserTriggeredAnalysis] 亮度已调整为 ${level}`);
+        return { success: true };
+      }
+
       switch (action.action) {
         case 'setDoNotDisturb':
-          await sceneBridge.setDoNotDisturb(action.params?.enable ?? true);
+          return { success: false, error: 'unreachable_legacy_do_not_disturb' };
           console.log(`[useUserTriggeredAnalysis] ✓ 勿扰模式已${action.params?.enable ? '开启' : '关闭'}`);
           break;
           
         case 'setBrightness':
-          await sceneBridge.setBrightness(action.params?.level ?? 0.5);
+          return { success: false, error: 'unreachable_legacy_brightness' };
           console.log(`[useUserTriggeredAnalysis] ✓ 亮度已调整为 ${action.params?.level ?? 0.5}`);
           break;
           
@@ -90,8 +179,14 @@ async function executeSmartAction(action: SmartAction): Promise<{ success: boole
           break;
           
         case 'setVolume':
-          // 音量控制暂不支持，记录日志
-          console.log(`[useUserTriggeredAnalysis] ⚠ 音量控制请求: ${action.params?.level ?? 0.5} (暂不支持)`);
+          {
+            const { streamType, levelPercent } = resolveVolumeParams(action.params);
+            const success = await SystemSettingsController.setVolume(streamType, levelPercent);
+            if (!success) {
+              return { success: false, error: `音量设置失败: ${streamType}=${levelPercent}%` };
+            }
+            console.log(`[useUserTriggeredAnalysis] 音量已设置: ${streamType}=${levelPercent}%`);
+          }
           break;
           
         default:
@@ -101,8 +196,10 @@ async function executeSmartAction(action: SmartAction): Promise<{ success: boole
       
       return { success: true };
     } else if (action.type === 'app' && action.appCategory) {
-      // 应用启动暂时只记录日志
-      console.log(`[useUserTriggeredAnalysis] 🚀 应用启动请求: ${action.appCategory}`);
+      const success = await launchAppByCategory(action.appCategory);
+      if (!success) {
+        return { success: false, error: `无法打开应用类别: ${action.appCategory}` };
+      }
       return { success: true };
     }
     
@@ -117,7 +214,10 @@ async function executeSmartAction(action: SmartAction): Promise<{ success: boole
 /**
  * 执行 SmartSuggestion 中的所有动作
  */
-async function executeSmartSuggestionActions(suggestion: SmartSuggestion): Promise<{
+async function executeSmartSuggestionActions(
+  suggestion: SmartSuggestion,
+  sceneType?: SceneType
+): Promise<{
   total: number;
   succeeded: number;
   failed: number;
@@ -132,6 +232,9 @@ async function executeSmartSuggestionActions(suggestion: SmartSuggestion): Promi
   
   for (const action of executableActions) {
     const result = await executeSmartAction(action);
+    if (sceneType && action.id) {
+      await personalizationManager.recordActionOutcome(sceneType, action.id, result.success);
+    }
     results.push({
       action: action.label,
       success: result.success,
@@ -196,9 +299,10 @@ export function useUserTriggeredAnalysis(): UseUserTriggeredAnalysisReturn {
       const isAudio = pred.label.startsWith('audio:');
       
       if (isImage || isAudio) {
+        const durationMs = Math.max(1, Date.now() - startTime);
         recordMLInference({
           type: isImage ? 'image' : 'audio',
-          duration: Math.round(Math.random() * 50 + 50), // 模拟推理时间 50-100ms
+          duration: durationMs,
           success: true,
           topLabel: pred.label.replace(/^(image:|audio:)/, ''),
           topScore: pred.score,
@@ -410,7 +514,7 @@ export function useUserTriggeredAnalysis(): UseUserTriggeredAnalysisReturn {
         try {
           console.log('[useUserTriggeredAnalysis] 开始执行 SmartSuggestion 动作...');
           
-          const execResult = await executeSmartSuggestionActions(unifiedResult.smartSuggestion);
+          const execResult = await executeSmartSuggestionActions(unifiedResult.smartSuggestion, sceneType);
           
           if (execResult.succeeded > 0) {
             const successActions = execResult.results

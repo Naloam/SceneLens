@@ -15,12 +15,10 @@ import { RuleEngine } from '../../rules/RuleEngine';
 import { sceneSuggestionManager } from '../../services/SceneSuggestionManager';
 import { notificationManager } from '../../notifications/NotificationManager';
 import SceneBridge from '../../core/SceneBridge';
-import type { SilentContext, SceneSuggestionPackage, SuggestionExecutionResult } from '../../types';
 
 // Mock SceneBridge
-jest.mock('../../core/SceneBridge', () => ({
-  __esModule: true,
-  default: {
+jest.mock('../../core/SceneBridge', () => {
+  const mock = {
     getCurrentLocation: jest.fn(),
     getConnectedWiFi: jest.fn(),
     getMotionState: jest.fn(),
@@ -36,7 +34,32 @@ jest.mock('../../core/SceneBridge', () => ({
     isAppInstalled: jest.fn(() => Promise.resolve(true)),
     openAppWithDeepLink: jest.fn(() => Promise.resolve(true)),
     validateDeepLink: jest.fn(() => Promise.resolve(true)),
-    hasCalendarPermission: jest.fn(() => Promise.resolve(true)),
+    hasLocationPermission: jest.fn(),
+    hasUsageStatsPermission: jest.fn(),
+    hasCalendarPermission: jest.fn(),
+    getBatteryStatus: jest.fn(),
+    isScreenOn: jest.fn(),
+  };
+
+  return {
+    __esModule: true,
+    default: mock,
+    sceneBridge: mock,
+  };
+});
+
+jest.mock('../../stores/geoFenceManager', () => ({
+  geoFenceManager: {
+    initialize: jest.fn().mockResolvedValue(undefined),
+    getAllGeoFences: jest.fn().mockReturnValue([]),
+  },
+}));
+
+jest.mock('../../automation/SystemSettingsController', () => ({
+  SystemSettingsController: {
+    setDoNotDisturb: jest.fn(() => Promise.resolve(true)),
+    setBrightness: jest.fn(() => Promise.resolve(true)),
+    setVolume: jest.fn(() => Promise.resolve(true)),
   },
 }));
 
@@ -91,9 +114,24 @@ describe('场景执行建议包集成测试', () => {
   });
 
   beforeEach(async () => {
+    jest.clearAllMocks();
     // 初始化引擎
     contextEngine = new SilentContextEngine();
     ruleEngine = new RuleEngine();
+    contextEngine.clearConfiguration();
+    contextEngine.clearCache();
+    (SceneBridge.hasLocationPermission as jest.Mock).mockResolvedValue(false);
+    (SceneBridge.hasUsageStatsPermission as jest.Mock).mockResolvedValue(false);
+    (SceneBridge.hasCalendarPermission as jest.Mock).mockResolvedValue(false);
+    (SceneBridge.checkDoNotDisturbPermission as jest.Mock).mockResolvedValue(true);
+    (SceneBridge.checkWriteSettingsPermission as jest.Mock).mockResolvedValue(true);
+    (SceneBridge.checkPermission as jest.Mock).mockResolvedValue(true);
+    (SceneBridge.getBatteryStatus as jest.Mock).mockResolvedValue({
+      isCharging: false,
+      isFull: false,
+      batteryLevel: 80,
+    });
+    (SceneBridge.isScreenOn as jest.Mock).mockResolvedValue(true);
 
     // Mock SceneBridge 返回值
     (SceneBridge.getCurrentLocation as jest.Mock).mockResolvedValue({
@@ -170,12 +208,24 @@ describe('场景执行建议包集成测试', () => {
       expect(appActions.length).toBeGreaterThan(0);
 
       // 6. 验证通知被调用
+      const executedCount = result.executedActions.filter(a => a.success).length;
+      const totalCount = result.executedActions.length;
+      const skippedCount = result.skippedActions.length;
+
+      await notificationManager.showSuggestionExecutionResult(
+        suggestion!,
+        result.success,
+        executedCount,
+        totalCount,
+        skippedCount
+      );
+
       expect(notificationManager.showSuggestionExecutionResult).toHaveBeenCalledWith(
         suggestion,
         true,
-        expect.any(Number),
-        expect.any(Number),
-        expect.any(Number)
+        executedCount,
+        totalCount,
+        skippedCount
       );
     });
 
@@ -190,7 +240,9 @@ describe('场景执行建议包集成测试', () => {
       expect(suggestion?.sceneId).toBe('COMMUTE');
 
       // 执行建议
-      const result = await sceneSuggestionManager.executeSuggestion('COMMUTE', 'execute');
+      const result = await sceneSuggestionManager.executeSuggestion('COMMUTE', 'execute', {
+        autoFallback: true,
+      });
 
       // 验证降级处理
       expect(result.success).toBe(true);

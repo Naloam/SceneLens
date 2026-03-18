@@ -24,6 +24,10 @@ import { sceneSuggestionManager } from '../services/SceneSuggestionManager';
 import { predictiveTrigger } from '../core/PredictiveTrigger';
 import { feedbackProcessor } from '../learning/FeedbackProcessor';
 import { spacing } from '../theme/spacing';
+import {
+  mapOneTapActionKindToProcessorFeedback,
+  mapOneTapActionKindToUserFeedback,
+} from '../utils/suggestionFeedback';
 import SceneSuggestionCard from '../components/ui/SceneSuggestionCard';
 import { QuickActionsPanel } from '../components/quickactions/QuickActionsPanel';
 
@@ -49,7 +53,14 @@ import {
   ModelStatusCard,
 } from '../components/home';
 
-import type { SceneSuggestionPackage, SuggestionExecutionResult, SceneHistory, TriggeredContext, SceneType } from '../types';
+import type {
+  SceneSuggestionPackage,
+  SuggestionExecutionResult,
+  SceneHistory,
+  TriggeredContext,
+  SceneType,
+  OneTapActionKind,
+} from '../types';
 
 export const HomeScreen: React.FC = () => {
   // ============ Hooks ============
@@ -203,7 +214,7 @@ export const HomeScreen: React.FC = () => {
       setSuggestionDialogVisible(false);
       setPendingSuggestion(null);
 
-      handleSuggestionExecutionComplete(result);
+      handleSuggestionExecutionComplete(result, 'execute_all');
     } catch (error) {
       console.error('[HomeScreen] Execute suggestion failed:', error);
       Alert.alert(
@@ -237,18 +248,23 @@ export const HomeScreen: React.FC = () => {
   /**
    * 处理场景建议包执行完成
    */
-  const handleSuggestionExecutionComplete = useCallback((result: SuggestionExecutionResult) => {
+  const handleSuggestionExecutionComplete = useCallback((
+    result: SuggestionExecutionResult,
+    actionKind: OneTapActionKind = 'execute_all'
+  ) => {
     console.log('[HomeScreen] Suggestion execution complete:', result);
+    const userAction = mapOneTapActionKindToUserFeedback(actionKind, result.success);
+    const feedbackType = mapOneTapActionKindToProcessorFeedback(actionKind, result.success);
 
     addToHistory({
       sceneType: result.sceneId,
       timestamp: Date.now(),
       confidence: currentContext?.confidence ?? 0.7,
       triggered: true,
-      userAction: result.success ? 'accept' : 'cancel',
+      userAction,
     });
 
-    predictiveTrigger.recordFeedback(result.sceneId, result.success ? 'accept' : 'cancel');
+    predictiveTrigger.recordFeedback(result.sceneId, userAction);
     
     // 记录到反馈处理器（Phase 3）
     feedbackProcessor.recordFeedback(
@@ -260,7 +276,7 @@ export const HomeScreen: React.FC = () => {
         content: `执行 ${result.executedActions.length} 项操作`,
         confidence: currentContext?.confidence ?? 0.7,
       },
-      result.success ? 'ACCEPT' : 'IGNORE'
+      feedbackType
     );
 
     const successCount = result.executedActions.filter(a => a.success).length;

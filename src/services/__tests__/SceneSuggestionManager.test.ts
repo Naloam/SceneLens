@@ -1,37 +1,22 @@
-/**
- * SceneSuggestionManager 单元测试
- *
- * 测试场景执行建议包管理器的核心功能
- */
-
 import { SceneSuggestionManager } from '../SceneSuggestionManager';
-import type {
-  SceneType,
-  SceneSuggestionPackage,
-  SilentContext,
-  SuggestionExecutionResult,
-} from '../../types';
+import type { SceneType, SilentContext } from '../../types';
 
-// Mock 配置文件
 jest.mock('../../config/scene-suggestions.json', () => ({
   version: '1.0.0',
   lastUpdated: '2025-01-22',
-  description: '场景执行建议包配置',
+  description: 'Scene suggestion config',
   scenes: [
     {
       sceneId: 'COMMUTE',
-      displayName: '通勤',
+      displayName: 'Commute',
       icon: 'subway',
       color: '#3B82F6',
-      detectionHighlights: [
-        '早晚高峰时段（7-9点/17-19点）',
-        '靠近地铁站或处于步行/乘车状态',
-      ],
+      detectionHighlights: ['Rush hour window', 'Near transit station'],
       systemAdjustments: [
         {
           id: 'dnd_emergency',
-          label: '开启勿扰模式',
-          description: '允许紧急联系人来电',
+          label: 'Enable DND',
+          description: 'Allow emergency calls',
           action: 'setDoNotDisturb',
           params: {
             enable: true,
@@ -43,26 +28,26 @@ jest.mock('../../config/scene-suggestions.json', () => ({
       appLaunches: [
         {
           id: 'transit_qr',
-          label: '乘车码应用',
-          description: '支付宝乘车码',
+          label: 'Transit QR',
+          description: 'Open transit code',
           intent: 'TRANSIT_APP_TOP1',
           action: 'open_ticket_qr',
           deepLink: 'alipays://platformapi/startapp?appId=200011235',
-          fallbackAction: '打开首页',
+          fallbackAction: 'Open homepage',
         },
       ],
       oneTapActions: [
         {
           id: 'execute',
-          label: '开始通勤',
-          description: '开启勿扰+乘车码+音乐',
+          label: 'Start commute',
+          description: 'Enable DND and open transit QR',
           type: 'primary',
           action: 'execute_all',
         },
         {
           id: 'skip',
-          label: '本次跳过',
-          description: '不执行任何操作',
+          label: 'Skip',
+          description: 'Do nothing',
           type: 'secondary',
           action: 'dismiss',
         },
@@ -70,25 +55,22 @@ jest.mock('../../config/scene-suggestions.json', () => ({
       fallbackNotes: [
         {
           condition: 'no_dnd_permission',
-          message: '未授予勿扰权限时仅打开应用',
+          message: 'Open the app only when DND permission is missing',
           action: 'skip_system_settings',
         },
       ],
     },
     {
       sceneId: 'HOME',
-      displayName: '到家',
+      displayName: 'Home',
       icon: 'home',
       color: '#10B981',
-      detectionHighlights: [
-        '位于家庭地理围栏内',
-        '连接家庭 Wi-Fi 网络',
-      ],
+      detectionHighlights: ['Home geofence', 'Home Wi-Fi'],
       systemAdjustments: [
         {
           id: 'dnd_disable',
-          label: '关闭勿扰模式',
-          description: '恢复正常通知',
+          label: 'Disable DND',
+          description: 'Restore normal notifications',
           action: 'setDoNotDisturb',
           params: {
             enable: false,
@@ -99,8 +81,8 @@ jest.mock('../../config/scene-suggestions.json', () => ({
       oneTapActions: [
         {
           id: 'welcome',
-          label: '欢迎回家',
-          description: '关闭勿扰+调亮屏幕+智能家居',
+          label: 'Welcome home',
+          description: 'Disable DND',
           type: 'primary',
           action: 'execute_all',
         },
@@ -110,7 +92,6 @@ jest.mock('../../config/scene-suggestions.json', () => ({
   ],
 }));
 
-// Mock SceneBridge
 jest.mock('../../core/SceneBridge', () => ({
   __esModule: true,
   default: {
@@ -120,16 +101,16 @@ jest.mock('../../core/SceneBridge', () => ({
     checkDoNotDisturbPermission: jest.fn(() => Promise.resolve(true)),
     checkWriteSettingsPermission: jest.fn(() => Promise.resolve(true)),
     checkPermission: jest.fn(() => Promise.resolve(true)),
+    hasCalendarPermission: jest.fn(() => Promise.resolve(true)),
     isAppInstalled: jest.fn(() => Promise.resolve(true)),
     openAppWithDeepLink: jest.fn(() => Promise.resolve(true)),
     validateDeepLink: jest.fn(() => Promise.resolve(true)),
   },
 }));
 
-// Mock AppDiscoveryEngine
-jest.mock('../../discovery/AppDiscoveryEngine', () => ({
+jest.mock('../../discovery', () => ({
   appDiscoveryEngine: {
-    isInitialized: () => true,
+    isInitialized: jest.fn(() => true),
     initialize: jest.fn(() => Promise.resolve()),
     resolveIntent: jest.fn((intent: string) => {
       const map: Record<string, string> = {
@@ -141,192 +122,133 @@ jest.mock('../../discovery/AppDiscoveryEngine', () => ({
   },
 }));
 
-// Mock SceneExecutor
 jest.mock('../../executors/SceneExecutor', () => ({
   sceneExecutor: {
     initialize: jest.fn(() => Promise.resolve()),
   },
 }));
 
+jest.mock('../../automation/SystemSettingsController', () => ({
+  SystemSettingsController: {
+    setDoNotDisturb: jest.fn(() => Promise.resolve(true)),
+    setBrightness: jest.fn(() => Promise.resolve(true)),
+    setVolume: jest.fn(() => Promise.resolve(true)),
+  },
+}));
+
+jest.mock('../../stores/storageManager', () => ({
+  storageManager: {
+    getString: jest.fn(() => undefined),
+    set: jest.fn(),
+    clearAll: jest.fn(),
+  },
+}));
+
 import sceneBridge from '../../core/SceneBridge';
-import { appDiscoveryEngine } from '../../discovery/AppDiscoveryEngine';
+import { appDiscoveryEngine } from '../../discovery';
+import { storageManager } from '../../stores/storageManager';
+import { sceneExecutor } from '../../executors/SceneExecutor';
+import { dynamicSuggestionService } from '../DynamicSuggestionService';
+import { SystemSettingsController } from '../../automation/SystemSettingsController';
 
 describe('SceneSuggestionManager', () => {
   let manager: SceneSuggestionManager;
 
   beforeEach(() => {
-    manager = new SceneSuggestionManager();
     jest.clearAllMocks();
+    manager = new SceneSuggestionManager();
+    (storageManager.getString as jest.Mock).mockReturnValue(undefined);
+    (sceneBridge.setDoNotDisturb as jest.Mock).mockResolvedValue({ enabled: true, mode: 'priority' });
+    (sceneBridge.setBrightness as jest.Mock).mockResolvedValue({ level: 0.7, brightness: 0.7 });
+    (sceneBridge.setWakeLock as jest.Mock).mockResolvedValue({ enabled: true, timeout: 300000 });
+    (SystemSettingsController.setDoNotDisturb as jest.Mock).mockResolvedValue(true);
+    (SystemSettingsController.setBrightness as jest.Mock).mockResolvedValue(true);
+    (SystemSettingsController.setVolume as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.checkDoNotDisturbPermission as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.checkWriteSettingsPermission as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.checkPermission as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.hasCalendarPermission as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.isAppInstalled as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.openAppWithDeepLink as jest.Mock).mockResolvedValue(true);
+    (sceneBridge.validateDeepLink as jest.Mock).mockResolvedValue(true);
   });
 
-  describe('initialize', () => {
-    it('应该成功初始化管理器', async () => {
+  describe('initialize and queries', () => {
+    it('initializes idempotently', async () => {
+      const dynamicInitializeSpy = jest.spyOn(dynamicSuggestionService, 'initialize');
+
+      await Promise.all([manager.initialize(), manager.initialize()]);
+
+      expect(sceneExecutor.initialize).toHaveBeenCalledTimes(1);
+      expect(dynamicInitializeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('loads and caches config', async () => {
+      const first = await manager.loadConfig();
+      const second = await manager.loadConfig();
+
+      expect(first.version).toBe('1.0.0');
+      expect(second).toBe(first);
+      expect(first.scenes).toHaveLength(2);
+    });
+
+    it('filters scene content based on options', async () => {
       await manager.initialize();
-      expect(manager).toBeDefined();
-    });
 
-    it('应该重复初始化而不出错', async () => {
-      await manager.initialize();
-      await manager.initialize();
-      // 不应该抛出错误
-    });
-  });
-
-  describe('loadConfig', () => {
-    it('应该成功加载配置', async () => {
-      const config = await manager.loadConfig();
-      expect(config).toBeDefined();
-      expect(config.version).toBe('1.0.0');
-      expect(config.scenes).toHaveLength(2);
-    });
-
-    it('应该使用缓存的配置', async () => {
-      const config1 = await manager.loadConfig();
-      const config2 = await manager.loadConfig();
-      expect(config1).toBe(config2);
-    });
-
-    it('强制重新加载应该获取新配置', async () => {
-      const config1 = await manager.loadConfig();
-      const config2 = await manager.loadConfig({ forceReload: true });
-      expect(config1.version).toBe(config2.version);
-    });
-  });
-
-  describe('getAllScenes', () => {
-    beforeEach(async () => {
-      await manager.initialize();
-    });
-
-    it('应该返回所有场景建议包', async () => {
-      const scenes = await manager.getAllScenes();
-      expect(scenes).toHaveLength(2);
-      expect(scenes[0].sceneId).toBe('COMMUTE');
-      expect(scenes[1].sceneId).toBe('HOME');
-    });
-
-    it('应该支持过滤系统调整项', async () => {
       const scenes = await manager.getAllScenes({
         includeSystemAdjustments: false,
-      });
-      expect(scenes[0].systemAdjustments).toHaveLength(0);
-    });
-
-    it('应该支持过滤应用启动项', async () => {
-      const scenes = await manager.getAllScenes({
         includeAppLaunches: false,
-      });
-      expect(scenes[0].appLaunches).toHaveLength(0);
-    });
-
-    it('应该支持过滤降级说明', async () => {
-      const scenes = await manager.getAllScenes({
         includeFallbackNotes: false,
       });
-      expect(scenes[0].fallbackNotes).toHaveLength(0);
-    });
-  });
 
-  describe('getSuggestionBySceneType', () => {
-    beforeEach(async () => {
+      expect(scenes[0].systemAdjustments).toEqual([]);
+      expect(scenes[0].appLaunches).toEqual([]);
+      expect(scenes[0].fallbackNotes).toEqual([]);
+    });
+
+    it('returns scene by type and null for unknown scene', async () => {
       await manager.initialize();
+
+      const commute = await manager.getSuggestionBySceneType('COMMUTE');
+      const unknown = await manager.getSuggestionBySceneType('UNKNOWN' as SceneType);
+
+      expect(commute?.sceneId).toBe('COMMUTE');
+      expect(unknown).toBeNull();
     });
 
-    it('应该返回指定场景的建议包', async () => {
-      const scene = await manager.getSuggestionBySceneType('COMMUTE');
-      expect(scene).toBeDefined();
-      expect(scene?.sceneId).toBe('COMMUTE');
-      expect(scene?.displayName).toBe('通勤');
-    });
-
-    it('应该对不存在的场景返回 null', async () => {
-      const scene = await manager.getSuggestionBySceneType('UNKNOWN' as SceneType);
-      expect(scene).toBeNull();
-    });
-
-    it('应该包含检测要点', async () => {
-      const scene = await manager.getSuggestionBySceneType('COMMUTE');
-      expect(scene?.detectionHighlights).toHaveLength(2);
-      expect(scene?.detectionHighlights[0]).toContain('早晚高峰');
-    });
-  });
-
-  describe('getSuggestionByContext', () => {
-    beforeEach(async () => {
+    it('returns a scene by context when confidence passes threshold', async () => {
       await manager.initialize();
-    });
 
-    it('应该根据上下文返回建议包', async () => {
       const context: SilentContext = {
-        timestamp: Date.now(),
         context: 'COMMUTE',
-        confidence: 0.8,
+        confidence: 0.9,
+        timestamp: Date.now(),
         signals: [],
       };
-      const scene = await manager.getSuggestionByContext(context);
-      expect(scene).toBeDefined();
-      expect(scene?.sceneId).toBe('COMMUTE');
-    });
 
-    it('置信度低于阈值时应该返回 null', async () => {
-      const context: SilentContext = {
-        timestamp: Date.now(),
-        context: 'COMMUTE',
-        confidence: 0.2,
-        signals: [],
-      };
-      const scene = await manager.getSuggestionByContext(context, {
-        minConfidence: 0.5,
+      const matched = await manager.getSuggestionByContext(context, {
+        minConfidence: 0.7,
       });
-      expect(scene).toBeNull();
-    });
-
-    it('置信度高于阈值时应该返回建议包', async () => {
-      const context: SilentContext = {
-        timestamp: Date.now(),
-        context: 'COMMUTE',
-        confidence: 0.7,
-        signals: [],
-      };
-      const scene = await manager.getSuggestionByContext(context, {
-        minConfidence: 0.5,
+      const skipped = await manager.getSuggestionByContext(context, {
+        minConfidence: 0.95,
       });
-      expect(scene).toBeDefined();
-    });
-  });
 
-  describe('getDetectionHighlights', () => {
-    beforeEach(async () => {
+      expect(matched?.sceneId).toBe('COMMUTE');
+      expect(skipped).toBeNull();
+    });
+
+    it('returns highlights, actions, and fallback notes', async () => {
       await manager.initialize();
-    });
 
-    it('应该返回场景的检测要点', async () => {
       const highlights = await manager.getDetectionHighlights('COMMUTE');
-      expect(highlights).toHaveLength(2);
-      expect(highlights[0]).toContain('早晚高峰');
-    });
-
-    it('不存在的场景应该返回空数组', async () => {
-      const highlights = await manager.getDetectionHighlights('UNKNOWN' as SceneType);
-      expect(highlights).toEqual([]);
-    });
-  });
-
-  describe('getOneTapActions', () => {
-    beforeEach(async () => {
-      await manager.initialize();
-    });
-
-    it('应该返回场景的一键操作列表', async () => {
       const actions = await manager.getOneTapActions('COMMUTE');
-      expect(actions).toHaveLength(2);
-      expect(actions[0].id).toBe('execute');
-      expect(actions[0].type).toBe('primary');
-    });
+      const fallbackNotes = await manager.getFallbackNotes('COMMUTE');
 
-    it('不存在的场景应该返回空数组', async () => {
-      const actions = await manager.getOneTapActions('UNKNOWN' as SceneType);
-      expect(actions).toEqual([]);
+      expect(highlights).toContain('Rush hour window');
+      expect(actions.map(action => action.id)).toEqual(['execute', 'skip']);
+      expect(fallbackNotes).toEqual([
+        'Open the app only when DND permission is missing',
+      ]);
     });
   });
 
@@ -335,82 +257,151 @@ describe('SceneSuggestionManager', () => {
       await manager.initialize();
     });
 
-    it('应该成功执行 execute_all 操作', async () => {
+    it('executes execute_all successfully', async () => {
       const result = await manager.executeSuggestion('COMMUTE', 'execute', {
         autoFallback: true,
       });
 
       expect(result.success).toBe(true);
       expect(result.sceneId).toBe('COMMUTE');
-      expect(result.executedActions.length).toBeGreaterThan(0);
+      expect(result.executedActions).toHaveLength(2);
+      expect(SystemSettingsController.setDoNotDisturb).toHaveBeenCalledWith(true, 'priority');
+      expect(sceneBridge.setDoNotDisturb).not.toHaveBeenCalled();
     });
 
-    it('应该成功执行 dismiss 操作', async () => {
-      const result = await manager.executeSuggestion('COMMUTE', 'skip');
+    it('stops before app launch when system adjustment fails and autoFallback is false', async () => {
+      (sceneBridge.checkDoNotDisturbPermission as jest.Mock).mockResolvedValue(false);
+
+      const result = await manager.executeSuggestion('COMMUTE', 'execute', {
+        autoFallback: false,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fallbackApplied).toBe(false);
+      expect(result.executedActions).toHaveLength(1);
+      expect(result.executedActions[0]).toMatchObject({
+        type: 'system',
+        success: false,
+      });
+      expect(sceneBridge.openAppWithDeepLink).not.toHaveBeenCalled();
+    });
+
+    it('continues to app launch when system adjustment fails and autoFallback is true', async () => {
+      (sceneBridge.checkDoNotDisturbPermission as jest.Mock).mockResolvedValue(false);
+      (sceneBridge.openAppWithDeepLink as jest.Mock).mockResolvedValue(true);
+
+      const result = await manager.executeSuggestion('COMMUTE', 'execute', {
+        autoFallback: true,
+      });
 
       expect(result.success).toBe(true);
-      expect(result.skippedActions).toContain('all');
+      expect(result.fallbackApplied).toBe(true);
+      expect(result.executedActions).toHaveLength(2);
+      expect(result.executedActions[0]).toMatchObject({
+        type: 'system',
+        success: false,
+      });
+      expect(result.executedActions[1]).toMatchObject({
+        type: 'app',
+        success: true,
+      });
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledTimes(1);
     });
 
-    it('不存在的操作应该返回失败', async () => {
-      const result = await manager.executeSuggestion('COMMUTE', 'non_existent');
+    it('does not try app homepage fallback when autoFallback is false', async () => {
+      (sceneBridge.openAppWithDeepLink as jest.Mock).mockResolvedValue(false);
+
+      const result = await manager.executeSuggestion('COMMUTE', 'execute', {
+        autoFallback: false,
+      });
 
       expect(result.success).toBe(false);
-      expect(result.executedActions).toHaveLength(0);
+      expect(result.fallbackApplied).toBe(false);
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledTimes(1);
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledWith(
+        'com.eg.android.AlipayGphone',
+        'alipays://platformapi/startapp?appId=200011235'
+      );
     });
 
-    it('不存在的场景应该返回失败', async () => {
-      const result = await manager.executeSuggestion('UNKNOWN' as SceneType, 'execute');
+    it('tries app homepage fallback when autoFallback is true', async () => {
+      (sceneBridge.openAppWithDeepLink as jest.Mock)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
 
-      expect(result.success).toBe(false);
+      const result = await manager.executeSuggestion('COMMUTE', 'execute', {
+        autoFallback: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fallbackApplied).toBe(true);
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledTimes(2);
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenNthCalledWith(
+        1,
+        'com.eg.android.AlipayGphone',
+        'alipays://platformapi/startapp?appId=200011235'
+      );
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenNthCalledWith(
+        2,
+        'com.eg.android.AlipayGphone'
+      );
+    });
+
+    it('handles dismiss and invalid selections', async () => {
+      const dismissed = await manager.executeSuggestion('COMMUTE', 'skip');
+      const missingAction = await manager.executeSuggestion('COMMUTE', 'missing');
+      const missingScene = await manager.executeSuggestion('UNKNOWN' as SceneType, 'execute');
+
+      expect(dismissed.success).toBe(true);
+      expect(dismissed.skippedActions).toContain('all');
+      expect(missingAction.success).toBe(false);
+      expect(missingScene.success).toBe(false);
     });
   });
 
-  describe('getFallbackNotes', () => {
+  describe('recordResponse and version', () => {
     beforeEach(async () => {
       await manager.initialize();
     });
 
-    it('应该返回场景的降级说明消息', async () => {
-      const notes = await manager.getFallbackNotes('COMMUTE');
-      expect(notes).toHaveLength(1);
-      expect(notes[0]).toContain('勿扰权限');
-    });
-
-    it('没有降级说明的场景应该返回空数组', async () => {
-      const notes = await manager.getFallbackNotes('HOME');
-      expect(notes).toEqual([]);
-    });
-  });
-
-  describe('recordResponse', () => {
-    beforeEach(async () => {
-      await manager.initialize();
-    });
-
-    it('应该记录用户响应', async () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+    it('records response history through storageManager', async () => {
       await manager.recordResponse({
         sceneId: 'COMMUTE',
         actionId: 'execute',
         actionType: 'execute_all',
-        timestamp: Date.now(),
+        timestamp: 123,
       });
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
+
+      expect(storageManager.set).toHaveBeenCalledTimes(1);
+      expect(storageManager.set).toHaveBeenCalledWith(
+        'scene_suggestion_response_history',
+        JSON.stringify([
+          {
+            sceneId: 'COMMUTE',
+            actionId: 'execute',
+            actionType: 'execute_all',
+            timestamp: 123,
+          },
+        ])
+      );
+    });
+
+    it('reports config version before and after initialize', async () => {
+      const freshManager = new SceneSuggestionManager();
+
+      expect(freshManager.getConfigVersion()).toBe('unknown');
+
+      await manager.initialize();
+      expect(manager.getConfigVersion()).toBe('1.0.0');
     });
   });
 
-  describe('getConfigVersion', () => {
-    it('未初始化时应该返回 unknown', () => {
-      const version = manager.getConfigVersion();
-      expect(version).toBe('unknown');
+  it('uses the discovery engine intent resolver', async () => {
+    await manager.initialize();
+    await manager.executeSuggestion('COMMUTE', 'execute', {
+      autoFallback: true,
     });
 
-    it('初始化后应该返回配置版本', async () => {
-      await manager.initialize();
-      const version = manager.getConfigVersion();
-      expect(version).toBe('1.0.0');
-    });
+    expect(appDiscoveryEngine.resolveIntent).toHaveBeenCalledWith('TRANSIT_APP_TOP1');
   });
 });
