@@ -18,6 +18,10 @@
   ],
   "exclude": [
     "node_modules",
+    ".review",
+    "src/**/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
     "**/*.demo.ts",
     "**/*.demo.tsx",
     "**/*.verify.ts",

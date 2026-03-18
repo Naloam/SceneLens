@@ -1,6 +1,8 @@
 // Jest setup file
 // Add any global test setup here
 
+global.__DEV__ = true;
+
 // Mock console methods to reduce noise in tests
 global.console = {
   ...console,

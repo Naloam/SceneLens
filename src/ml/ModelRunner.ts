@@ -111,6 +111,7 @@ export interface ImageData {
   uri: string;
   width: number;
   height: number;
+  rgbBase64?: string;
 }
 
 export interface AudioData {
@@ -224,7 +225,7 @@ export class ModelRunner {
       const outputs = await this.imageModel.run([preprocessedInput]);
       
       // Extract output tensor (first output)
-      const output = outputs[0] as Float32Array;
+      const output = outputs[0] as ArrayLike<number>;
       
       // Post-process results
       const predictions = this.parseImageOutput(output);
@@ -264,7 +265,7 @@ export class ModelRunner {
       const outputs = await this.audioModel.run([preprocessedInput]);
       
       // Extract output tensor (first output)
-      const output = outputs[0] as Float32Array;
+      const output = outputs[0] as ArrayLike<number>;
       
       // Post-process results
       const predictions = this.parseAudioOutput(output);
@@ -286,30 +287,37 @@ export class ModelRunner {
     const [, height, width, channels] = config.input_shape;
     
     try {
-      // In a real implementation, this would:
-      // 1. Load the image from URI using React Native Image or Canvas API
-      // 2. Resize to 224x224 using bilinear interpolation
-      // 3. Convert RGB values to the expected input format
-      // 4. Apply normalization according to model requirements
-      
       console.log(`Preprocessing image: ${imageData.uri} (${imageData.width}x${imageData.height})`);
       
       const inputSize = height * width * channels;
-      // 模型输入为 uint8，这里使用 Uint8Array 提供 0-255 像素值
       const input = new Uint8Array(inputSize);
-      
-      // Simulate realistic image preprocessing
-      // MobileNetV3 typically expects input values in range [0, 1] or [-1, 1]
-      const meanValues = config.preprocessing.normalize.mean;
-      const stdValues = config.preprocessing.normalize.std;
-      
-      for (let i = 0; i < inputSize; i++) {
-        // Simulate pixel values after resize and normalization
-        // Generate values that look like normalized image pixels
-        const pixelValue = Math.random() * 255; // Simulate 0-255 pixel value
-        const channelIndex = i % 3; // RGB channel
-        // 对于量化模型，直接提供 0-255 的 uint8 像素值即可
-        input[i] = Math.min(255, Math.max(0, Math.round(pixelValue)));
+
+      // Prefer native-provided RGB bytes when available.
+      let sourceBytes: Uint8Array | null = null;
+      if (imageData.rgbBase64 && imageData.rgbBase64.length > 0) {
+        sourceBytes = this.decodeBase64ToBytes(imageData.rgbBase64);
+      } else {
+        const uriBase64 = this.extractBase64FromDataUri(imageData.uri);
+        if (uriBase64) {
+          sourceBytes = this.decodeBase64ToBytes(uriBase64);
+        }
+      }
+
+      if (!sourceBytes || sourceBytes.length === 0) {
+        throw new Error('No image bytes available for preprocessing');
+      }
+
+      // If bytes are raw RGB (length >= input), use direct mapping.
+      // Otherwise (e.g. JPEG bytes), map deterministically by cycling bytes.
+      const rawRgbLength = inputSize;
+      if (sourceBytes.length >= rawRgbLength) {
+        for (let i = 0; i < inputSize; i++) {
+          input[i] = sourceBytes[i];
+        }
+      } else {
+        for (let i = 0; i < inputSize; i++) {
+          input[i] = sourceBytes[i % sourceBytes.length];
+        }
       }
       
       // Calculate min/max without spread operator to avoid stack overflow
@@ -367,7 +375,11 @@ export class ModelRunner {
       }
       
       // 3. Normalize amplitude to [-1, 1] range
-      const maxAmplitude = Math.max(...Array.from(input).map(Math.abs));
+      let maxAmplitude = 0;
+      for (let i = 0; i < input.length; i++) {
+        const amplitude = Math.abs(input[i]);
+        if (amplitude > maxAmplitude) maxAmplitude = amplitude;
+      }
       if (maxAmplitude > 0) {
         for (let i = 0; i < input.length; i++) {
           input[i] = input[i] / maxAmplitude;
@@ -424,7 +436,7 @@ export class ModelRunner {
    * Parse image model output into predictions
    * Applies softmax normalization and confidence thresholding
    */
-  private parseImageOutput(output: Float32Array): Prediction[] {
+  private parseImageOutput(output: ArrayLike<number>): Prediction[] {
     const config = this.modelConfigs.mobilenet_v3_small;
     
     // Apply softmax to convert logits to probabilities
@@ -455,7 +467,7 @@ export class ModelRunner {
    * Parse audio model output into predictions
    * Applies softmax normalization and confidence thresholding
    */
-  private parseAudioOutput(output: Float32Array): Prediction[] {
+  private parseAudioOutput(output: ArrayLike<number>): Prediction[] {
     const config = this.modelConfigs.yamnet_lite;
     
     // Apply softmax to convert logits to probabilities
@@ -485,9 +497,15 @@ export class ModelRunner {
   /**
    * Apply softmax function to convert logits to probabilities
    */
-  private applySoftmax(logits: Float32Array): Float32Array {
+  private applySoftmax(logits: ArrayLike<number>): Float32Array {
     // Find the maximum value for numerical stability
-    const maxLogit = Math.max(...Array.from(logits));
+    if (logits.length === 0) {
+      return new Float32Array(0);
+    }
+    let maxLogit = logits[0];
+    for (let i = 1; i < logits.length; i++) {
+      if (logits[i] > maxLogit) maxLogit = logits[i];
+    }
     
     // Compute exponentials
     const exponentials = new Float32Array(logits.length);
@@ -505,6 +523,55 @@ export class ModelRunner {
     }
     
     return probabilities;
+  }
+
+  private extractBase64FromDataUri(uri: string): string | null {
+    const marker = 'base64,';
+    const idx = uri.indexOf(marker);
+    if (idx < 0) return null;
+    return uri.slice(idx + marker.length);
+  }
+
+  private decodeBase64ToBytes(base64: string): Uint8Array {
+    const clean = base64.replace(/[\r\n\s]/g, '');
+    if (!clean) return new Uint8Array(0);
+
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const lookup = new Int16Array(256);
+    lookup.fill(-1);
+    for (let i = 0; i < alphabet.length; i++) {
+      lookup[alphabet.charCodeAt(i)] = i;
+    }
+
+    let padding = 0;
+    if (clean.endsWith('==')) padding = 2;
+    else if (clean.endsWith('=')) padding = 1;
+
+    const outputLength = Math.floor((clean.length * 3) / 4) - padding;
+    const out = new Uint8Array(Math.max(0, outputLength));
+
+    let outIndex = 0;
+    for (let i = 0; i < clean.length; i += 4) {
+      const c1 = lookup[clean.charCodeAt(i)] ?? -1;
+      const c2 = lookup[clean.charCodeAt(i + 1)] ?? -1;
+      const ch3 = clean.charCodeAt(i + 2);
+      const ch4 = clean.charCodeAt(i + 3);
+
+      const c3 = ch3 === 61 ? 0 : (lookup[ch3] ?? -1); // '=' => 61
+      const c4 = ch4 === 61 ? 0 : (lookup[ch4] ?? -1);
+
+      if (c1 < 0 || c2 < 0 || c3 < 0 || c4 < 0) {
+        continue;
+      }
+
+      const combined = (c1 << 18) | (c2 << 12) | (c3 << 6) | c4;
+
+      if (outIndex < out.length) out[outIndex++] = (combined >> 16) & 0xff;
+      if (ch3 !== 61 && outIndex < out.length) out[outIndex++] = (combined >> 8) & 0xff;
+      if (ch4 !== 61 && outIndex < out.length) out[outIndex++] = combined & 0xff;
+    }
+
+    return out;
   }
 
   /**

@@ -380,7 +380,7 @@ export class UserTriggeredAnalyzer {
   /**
    * 转换 ImageData 为 ModelRunner 期望的格式
    */
-  private convertToModelImageData(imageData: ImageData): { uri: string; width: number; height: number } {
+  private convertToModelImageData(imageData: ImageData): { uri: string; width: number; height: number; rgbBase64?: string } {
     // 创建 data URI
     const uri = `data:image/${imageData.format.toLowerCase()};base64,${imageData.base64}`;
     
@@ -388,6 +388,7 @@ export class UserTriggeredAnalyzer {
       uri,
       width: imageData.width,
       height: imageData.height,
+      rgbBase64: (imageData as any).rgbBase64,
     };
   }
 
@@ -399,22 +400,154 @@ export class UserTriggeredAnalyzer {
     sampleRate: number;
     duration: number;
   } {
-    // 这里需要将 base64 音频数据转换为 Float32Array
-    // 在实际实现中，这需要音频解码库
-    // 目前使用模拟数据
-    const sampleCount = Math.floor((audioData.duration / 1000) * audioData.sampleRate);
-    const samples = new Float32Array(sampleCount);
-    
-    // 生成模拟的音频样本（在实际实现中应该解码 base64 数据）
-    for (let i = 0; i < sampleCount; i++) {
-      samples[i] = (Math.random() - 0.5) * 2; // -1 到 1 之间的随机值
+    const bytes = this.decodeBase64ToBytes(audioData.base64);
+    const decoded = this.decodeWavPcm16(bytes);
+
+    if (!decoded || decoded.samples.length === 0) {
+      console.warn('Failed to decode WAV audio, using silence fallback');
+      const sampleCount = Math.floor((audioData.duration / 1000) * audioData.sampleRate);
+      return {
+        samples: new Float32Array(Math.max(1, sampleCount)),
+        sampleRate: audioData.sampleRate,
+        duration: Math.max(0.001, audioData.duration / 1000),
+      };
     }
-    
+
+    const durationSec = decoded.samples.length / decoded.sampleRate;
     return {
-      samples,
-      sampleRate: audioData.sampleRate,
-      duration: audioData.duration,
+      samples: decoded.samples,
+      sampleRate: decoded.sampleRate,
+      duration: durationSec,
     };
+  }
+
+  private decodeBase64ToBytes(base64: string): Uint8Array {
+    const clean = base64.replace(/[\r\n\s]/g, '');
+    if (!clean) return new Uint8Array(0);
+
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const lookup = new Int16Array(256);
+    lookup.fill(-1);
+    for (let i = 0; i < alphabet.length; i++) {
+      lookup[alphabet.charCodeAt(i)] = i;
+    }
+
+    let padding = 0;
+    if (clean.endsWith('==')) padding = 2;
+    else if (clean.endsWith('=')) padding = 1;
+
+    const outputLength = Math.floor((clean.length * 3) / 4) - padding;
+    const out = new Uint8Array(Math.max(0, outputLength));
+
+    let outIndex = 0;
+    for (let i = 0; i < clean.length; i += 4) {
+      const c1 = lookup[clean.charCodeAt(i)] ?? -1;
+      const c2 = lookup[clean.charCodeAt(i + 1)] ?? -1;
+      const ch3 = clean.charCodeAt(i + 2);
+      const ch4 = clean.charCodeAt(i + 3);
+      const c3 = ch3 === 61 ? 0 : (lookup[ch3] ?? -1);
+      const c4 = ch4 === 61 ? 0 : (lookup[ch4] ?? -1);
+
+      if (c1 < 0 || c2 < 0 || c3 < 0 || c4 < 0) {
+        continue;
+      }
+
+      const value = (c1 << 18) | (c2 << 12) | (c3 << 6) | c4;
+      if (outIndex < out.length) out[outIndex++] = (value >> 16) & 0xff;
+      if (ch3 !== 61 && outIndex < out.length) out[outIndex++] = (value >> 8) & 0xff;
+      if (ch4 !== 61 && outIndex < out.length) out[outIndex++] = value & 0xff;
+    }
+
+    return out;
+  }
+
+  private decodeWavPcm16(
+    bytes: Uint8Array
+  ): { samples: Float32Array; sampleRate: number } | null {
+    if (bytes.length < 44) return null;
+    if (!this.matchesAscii(bytes, 0, 'RIFF') || !this.matchesAscii(bytes, 8, 'WAVE')) {
+      return null;
+    }
+
+    let offset = 12;
+    let sampleRate = 16000;
+    let channels = 1;
+    let bitsPerSample = 16;
+    let dataOffset = -1;
+    let dataSize = 0;
+
+    while (offset + 8 <= bytes.length) {
+      const chunkId = this.readAscii(bytes, offset, 4);
+      const chunkSize = this.readUint32LE(bytes, offset + 4);
+      const chunkDataOffset = offset + 8;
+
+      if (chunkId === 'fmt ' && chunkSize >= 16 && chunkDataOffset + 16 <= bytes.length) {
+        const audioFormat = this.readUint16LE(bytes, chunkDataOffset);
+        channels = this.readUint16LE(bytes, chunkDataOffset + 2);
+        sampleRate = this.readUint32LE(bytes, chunkDataOffset + 4);
+        bitsPerSample = this.readUint16LE(bytes, chunkDataOffset + 14);
+        if (audioFormat !== 1) return null; // PCM only
+      } else if (chunkId === 'data') {
+        dataOffset = chunkDataOffset;
+        dataSize = chunkSize;
+        break;
+      }
+
+      offset = chunkDataOffset + chunkSize + (chunkSize % 2);
+    }
+
+    if (dataOffset < 0 || dataOffset + dataSize > bytes.length) return null;
+    if (bitsPerSample !== 16 || channels < 1) return null;
+
+    const frameCount = Math.floor(dataSize / (2 * channels));
+    const samples = new Float32Array(frameCount);
+
+    for (let frame = 0; frame < frameCount; frame++) {
+      const frameStart = dataOffset + frame * channels * 2;
+      let sum = 0;
+      for (let ch = 0; ch < channels; ch++) {
+        const sampleOffset = frameStart + ch * 2;
+        const int16 = this.readInt16LE(bytes, sampleOffset);
+        sum += int16 / 32768;
+      }
+      samples[frame] = sum / channels;
+    }
+
+    return { samples, sampleRate };
+  }
+
+  private readAscii(bytes: Uint8Array, offset: number, length: number): string {
+    let result = '';
+    for (let i = 0; i < length && offset + i < bytes.length; i++) {
+      result += String.fromCharCode(bytes[offset + i]);
+    }
+    return result;
+  }
+
+  private matchesAscii(bytes: Uint8Array, offset: number, expected: string): boolean {
+    if (offset + expected.length > bytes.length) return false;
+    for (let i = 0; i < expected.length; i++) {
+      if (bytes[offset + i] !== expected.charCodeAt(i)) return false;
+    }
+    return true;
+  }
+
+  private readUint16LE(bytes: Uint8Array, offset: number): number {
+    return bytes[offset] | (bytes[offset + 1] << 8);
+  }
+
+  private readUint32LE(bytes: Uint8Array, offset: number): number {
+    return (
+      bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24)
+    ) >>> 0;
+  }
+
+  private readInt16LE(bytes: Uint8Array, offset: number): number {
+    const value = this.readUint16LE(bytes, offset);
+    return value > 0x7fff ? value - 0x10000 : value;
   }
 
   /**
