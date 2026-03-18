@@ -21,6 +21,7 @@ const STORAGE_KEYS = {
   PERSONALIZATION: 'smart_suggestion_personalization',
   APP_USAGE: 'smart_suggestion_app_usage',
   PREFERENCE: 'smart_suggestion_preference',
+  ACTION_LEARNING: 'smart_suggestion_action_learning',
 } as const;
 
 /**
@@ -37,6 +38,10 @@ export interface UserPreferences {
   showActionReasons?: boolean;
   /** 是否启用个性化 */
   personalizationEnabled?: boolean;
+  /** 是否启用在线学习（动作排序） */
+  onlineLearningEnabled?: boolean;
+  /** 在线学习半衰期（天） */
+  learningHalfLifeDays?: number;
 }
 
 /**
@@ -50,13 +55,24 @@ interface AppUsageRecord {
   sceneUsage: Record<SceneType, number>;
 }
 
+interface ActionLearningRecord {
+  sceneType: SceneType;
+  actionId: string;
+  attempts: number;
+  success: number;
+  failure: number;
+  lastUpdated: number;
+}
+
 /**
  * 个性化管理器类
  */
 export class PersonalizationManager {
   private preferences: UserPreferences = {};
   private appUsage: Map<string, AppUsageRecord> = new Map();
+  private actionLearning: Map<string, ActionLearningRecord> = new Map();
   private initialized = false;
+  private readonly DEFAULT_HALF_LIFE_DAYS = 14;
 
   /**
    * 初始化
@@ -77,6 +93,15 @@ export class PersonalizationManager {
         const savedUsage = JSON.parse(savedUsageJson) as AppUsageRecord[];
         for (const record of savedUsage) {
           this.appUsage.set(record.packageName, record);
+        }
+      }
+
+      // 加载动作学习记录（轻量在线学习）
+      const savedLearningJson = storageManager.getString(STORAGE_KEYS.ACTION_LEARNING);
+      if (savedLearningJson) {
+        const records = JSON.parse(savedLearningJson) as ActionLearningRecord[];
+        for (const record of records) {
+          this.actionLearning.set(this.getActionLearningKey(record.sceneType, record.actionId), record);
         }
       }
 
@@ -249,6 +274,92 @@ export class PersonalizationManager {
     }
   }
 
+  private async saveActionLearning(): Promise<void> {
+    try {
+      const records = Array.from(this.actionLearning.values());
+      storageManager.set(STORAGE_KEYS.ACTION_LEARNING, JSON.stringify(records));
+    } catch (error) {
+      console.warn('[PersonalizationManager] 保存动作学习记录失败:', error);
+    }
+  }
+
+  private getActionLearningKey(sceneType: SceneType, actionId: string): string {
+    return `${sceneType}:${actionId}`;
+  }
+
+  async recordActionOutcome(sceneType: SceneType, actionId: string, success: boolean): Promise<void> {
+    await this.initialize();
+    if (this.preferences.onlineLearningEnabled === false) return;
+
+    const key = this.getActionLearningKey(sceneType, actionId);
+    const existing = this.actionLearning.get(key);
+    const next: ActionLearningRecord = existing
+      ? {
+          ...existing,
+          attempts: existing.attempts + 1,
+          success: existing.success + (success ? 1 : 0),
+          failure: existing.failure + (success ? 0 : 1),
+          lastUpdated: Date.now(),
+        }
+      : {
+          sceneType,
+          actionId,
+          attempts: 1,
+          success: success ? 1 : 0,
+          failure: success ? 0 : 1,
+          lastUpdated: Date.now(),
+        };
+
+    this.actionLearning.set(key, next);
+    await this.saveActionLearning();
+  }
+
+  private getActionLearningBoost(sceneType: SceneType, actionId: string): number {
+    if (this.preferences.onlineLearningEnabled === false) return 0;
+
+    const key = this.getActionLearningKey(sceneType, actionId);
+    const record = this.actionLearning.get(key);
+    if (!record || record.attempts <= 0) return 0;
+
+    const decayed = this.getDecayedLearningRecord(record);
+    if (decayed.attempts <= 0.1) return 0;
+
+    // UCB 风格轻量探索：在高成功率与低尝试次数之间平衡
+    const successRate = decayed.success / decayed.attempts;
+    const totalSceneAttempts = Array.from(this.actionLearning.values())
+      .filter(r => r.sceneType === sceneType)
+      .map(r => this.getDecayedLearningRecord(r).attempts)
+      .reduce((sum, attempts) => sum + attempts, 0);
+    const exploration = Math.sqrt((2 * Math.log(totalSceneAttempts + 1)) / (decayed.attempts + 1));
+    const failureRate = decayed.failure / decayed.attempts;
+
+    const boost = successRate * 20 + exploration * 8 - failureRate * 10;
+    return Math.max(-15, Math.min(20, boost));
+  }
+
+  private getDecayedLearningRecord(record: ActionLearningRecord): {
+    attempts: number;
+    success: number;
+    failure: number;
+  } {
+    const halfLifeDays = this.getLearningHalfLifeDays();
+    const ageMs = Math.max(0, Date.now() - record.lastUpdated);
+    const ageDays = ageMs / (24 * 60 * 60 * 1000);
+    const decayFactor = Math.pow(0.5, ageDays / halfLifeDays);
+
+    return {
+      attempts: record.attempts * decayFactor,
+      success: record.success * decayFactor,
+      failure: record.failure * decayFactor,
+    };
+  }
+
+  private getLearningHalfLifeDays(): number {
+    const configured = this.preferences.learningHalfLifeDays;
+    if (!configured || configured <= 0) return this.DEFAULT_HALF_LIFE_DAYS;
+    return Math.max(3, Math.min(90, configured));
+  }
+
   /**
    * 设置用户偏好
    */
@@ -260,6 +371,27 @@ export class PersonalizationManager {
     } catch (error) {
       console.warn('[PersonalizationManager] 保存偏好失败:', error);
     }
+  }
+
+  async setOnlineLearningEnabled(enabled: boolean): Promise<void> {
+    await this.setPreferences({ onlineLearningEnabled: enabled });
+  }
+
+  async setLearningHalfLifeDays(days: number): Promise<void> {
+    const clampedDays = Math.max(3, Math.min(90, Math.round(days)));
+    await this.setPreferences({ learningHalfLifeDays: clampedDays });
+  }
+
+  getOnlineLearningConfig(): { enabled: boolean; halfLifeDays: number } {
+    return {
+      enabled: this.preferences.onlineLearningEnabled !== false,
+      halfLifeDays: this.getLearningHalfLifeDays(),
+    };
+  }
+
+  async clearOnlineLearningData(): Promise<void> {
+    this.actionLearning.clear();
+    storageManager.delete(STORAGE_KEYS.ACTION_LEARNING);
   }
 
   /**
@@ -316,7 +448,7 @@ export class PersonalizationManager {
   /**
    * 过滤和排序动作
    */
-  filterAndSortActions<T extends { priority: number; params?: Record<string, any> }>(
+  filterAndSortActions<T extends { id?: string; priority: number; params?: Record<string, any> }>(
     actions: T[],
     factors: PersonalizationFactors,
     sceneType: SceneType
@@ -331,6 +463,13 @@ export class PersonalizationManager {
         return { ...action, priority: action.priority + 10 };
       }
       return action;
+    });
+
+    // 叠加轻量在线学习分数
+    filtered = filtered.map(action => {
+      if (!action.id) return action;
+      const boost = this.getActionLearningBoost(sceneType, action.id);
+      return { ...action, priority: action.priority + boost };
     });
 
     // 按优先级排序
@@ -419,12 +558,14 @@ export class PersonalizationManager {
   async reset(): Promise<void> {
     this.preferences = {};
     this.appUsage.clear();
+    this.actionLearning.clear();
 
     try {
       // 通过设置空字符串来删除（MMKV 的 delete 模拟）
       storageManager.delete(STORAGE_KEYS.PREFERENCE);
       storageManager.delete(STORAGE_KEYS.APP_USAGE);
       storageManager.delete(STORAGE_KEYS.PERSONALIZATION);
+      storageManager.delete(STORAGE_KEYS.ACTION_LEARNING);
     } catch (error) {
       console.warn('[PersonalizationManager] 重置失败:', error);
     }
