@@ -16,6 +16,7 @@ import type {
 } from '../../types/automation';
 import { SystemSettingsController } from '../../automation/SystemSettingsController';
 import { AppLaunchController } from '../../automation/AppLaunchController';
+import { notificationManager } from '../../notifications/NotificationManager';
 
 // ==================== 存储键 ====================
 
@@ -548,14 +549,48 @@ export class RuleExecutor {
    * 执行通知动作
    */
   private async executeNotificationAction(params: Record<string, unknown>): Promise<void> {
-    const { title, body } = params as { title?: string; body?: string };
-    
+    const {
+      title,
+      body,
+      sceneType,
+      confidence,
+      notificationType,
+      success,
+      message,
+    } = params as {
+      title?: string;
+      body?: string;
+      sceneType?: SceneType;
+      confidence?: number;
+      notificationType?: 'scene_suggestion' | 'execution_result' | 'system';
+      success?: boolean;
+      message?: string;
+    };
+
+    if (notificationType === 'scene_suggestion' && sceneType) {
+      await notificationManager.showSceneSuggestion({
+        sceneType,
+        title: title ?? '场景建议',
+        body: body ?? '',
+        actions: [],
+        confidence: typeof confidence === 'number' ? confidence : 0.7,
+      });
+      return;
+    }
+
+    if (notificationType === 'execution_result' && sceneType) {
+      await notificationManager.showExecutionResult(
+        sceneType,
+        success ?? true,
+        message ?? body ?? '执行完成'
+      );
+      return;
+    }
+
     if (!title || !body) {
       throw new Error('Title and body are required for notification action');
     }
-
-    // TODO: 集成 NotificationManager
-    console.log(`[RuleExecutor] Would send notification: ${title} - ${body}`);
+    await notificationManager.showSystemNotification(title, body);
   }
 
   /**
