@@ -7,6 +7,7 @@ import { sceneBridge } from '../SceneBridge';
 
 // Mock the sceneBridge
 jest.mock('../SceneBridge', () => ({
+  isSceneBridgeNative: true,
   sceneBridge: {
     enableVolumeKeyListener: jest.fn(),
     disableVolumeKeyListener: jest.fn(),

@@ -7,6 +7,7 @@ import { sceneBridge } from '../SceneBridge';
 
 // Mock SceneBridge
 jest.mock('../SceneBridge', () => ({
+  isSceneBridgeNative: true,
   sceneBridge: {
     createSceneAnalysisShortcut: jest.fn(),
     removeSceneAnalysisShortcut: jest.fn(),
