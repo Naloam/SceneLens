@@ -9,6 +9,7 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  AppState,
   Linking,
   Platform,
   Keyboard,
@@ -32,6 +33,7 @@ import Slider from '@react-native-community/slider';
 import { geoFenceManager } from '../stores';
 import sceneBridge from '../core/SceneBridge';
 import { silentContextEngine } from '../core/SilentContextEngine';
+import { extractCoordinatesFromText } from '../utils/locationImport';
 import type { GeoFence, Location, GeoFenceType } from '../types';
 
 type FenceConfigType = 'HOME' | 'OFFICE' | 'SUBWAY_STATION';
@@ -63,6 +65,8 @@ export const LocationConfigScreen: React.FC = () => {
   const [manualLatitude, setManualLatitude] = useState('');
   const [manualLongitude, setManualLongitude] = useState('');
   const [manualInputType, setManualInputType] = useState<FenceConfigType>('HOME');
+  const [pendingMapImportType, setPendingMapImportType] = useState<FenceConfigType | null>(null);
+  const [importSourceText, setImportSourceText] = useState('');
 
   // 滑块临时值状态（避免频繁更新）
   const [sliderValues, setSliderValues] = useState<Record<FenceConfigType, number>>({
@@ -123,6 +127,74 @@ export const LocationConfigScreen: React.FC = () => {
     }
   }, [fenceConfigs]);
 
+  const requestLocationAccess = async (showAlert = true): Promise<boolean> => {
+    try {
+      const granted = await sceneBridge.hasLocationPermission();
+      if (granted) {
+        return true;
+      }
+
+      const requested = await sceneBridge.requestLocationPermission();
+      if (requested) {
+        return true;
+      }
+
+      if (showAlert) {
+        Alert.alert(
+          '需要位置权限',
+          '请先允许位置权限，才能使用当前位置导入围栏。'
+        );
+      }
+      return false;
+    } catch (error) {
+      console.error('请求位置权限失败:', error);
+      if (showAlert) {
+        Alert.alert('错误', '无法请求位置权限，请稍后重试。');
+      }
+      return false;
+    }
+  };
+
+  const loadCurrentLocation = async ({
+    requestPermission = false,
+    showErrorAlert = true,
+    successMessage,
+  }: {
+    requestPermission?: boolean;
+    showErrorAlert?: boolean;
+    successMessage?: string;
+  } = {}): Promise<Location | null> => {
+    if (requestPermission) {
+      const canContinue = await requestLocationAccess(showErrorAlert);
+      if (!canContinue) {
+        return null;
+      }
+    }
+
+    try {
+      const location = await sceneBridge.getCurrentLocation();
+      if (!location) {
+        setCurrentLocation(null);
+        if (showErrorAlert) {
+          Alert.alert('提示', '未能获取当前位置，请确认系统定位服务已开启。');
+        }
+        return null;
+      }
+
+      setCurrentLocation(location);
+      if (successMessage) {
+        Alert.alert('成功', successMessage);
+      }
+      return location;
+    } catch (error) {
+      console.error('获取当前位置失败:', error);
+      if (showErrorAlert) {
+        Alert.alert('错误', '无法获取当前位置');
+      }
+      return null;
+    }
+  };
+
   /**
    * 初始化位置配置
    */
@@ -147,7 +219,7 @@ export const LocationConfigScreen: React.FC = () => {
 
       // 获取当前位置
       try {
-        const location = await sceneBridge.getCurrentLocation();
+        const location = await loadCurrentLocation({ showErrorAlert: false });
         setCurrentLocation(location);
       } catch (error) {
         console.warn('获取当前位置失败:', error);
@@ -166,9 +238,11 @@ export const LocationConfigScreen: React.FC = () => {
   const refreshLocation = async () => {
     setIsRefreshing(true);
     try {
-      const location = await sceneBridge.getCurrentLocation();
-      setCurrentLocation(location);
-      Alert.alert('成功', '位置已更新');
+      await loadCurrentLocation({
+        requestPermission: true,
+        successMessage: '当前位置已更新',
+      });
+      return;
     } catch (error) {
       console.error('刷新位置失败:', error);
       Alert.alert('错误', '无法获取当前位置');
@@ -181,7 +255,8 @@ export const LocationConfigScreen: React.FC = () => {
    * 设置当前位置为选定类型的围栏
    */
   const setCurrentLocationAsFence = async (type: FenceConfigType) => {
-    if (!currentLocation) {
+    const resolvedLocation = currentLocation ?? await loadCurrentLocation({ requestPermission: true });
+    if (!resolvedLocation) {
       Alert.alert('错误', '无法获取当前位置');
       return;
     }
@@ -197,8 +272,8 @@ export const LocationConfigScreen: React.FC = () => {
         // 更新现有围栏
         const updated = await geoFenceManager.updateGeoFence(existing.id, {
           name: config.name,
-          latitude: currentLocation.latitude,
-          longitude: currentLocation.longitude,
+          latitude: resolvedLocation.latitude,
+          longitude: resolvedLocation.longitude,
           radius: config.defaultRadius,
         });
 
@@ -213,8 +288,8 @@ export const LocationConfigScreen: React.FC = () => {
         const newFence = await geoFenceManager.createGeoFence(
           config.name,
           type,
-          currentLocation.latitude,
-          currentLocation.longitude,
+          resolvedLocation.latitude,
+          resolvedLocation.longitude,
           config.defaultRadius
         );
 
@@ -292,12 +367,25 @@ export const LocationConfigScreen: React.FC = () => {
   /**
    * 打开手动输入对话框
    */
-  const openManualInput = (type: FenceConfigType) => {
+  const openManualInput = (
+    type: FenceConfigType,
+    importedCoordinates?: { latitude: number; longitude: number },
+    importedText?: string
+  ) => {
+    setSelectedTab(type);
     const config = fenceConfigs[type];
+    setSelectedTab(type);
     setManualInputType(type);
+    setImportSourceText(importedText ?? '');
+    if (!importedCoordinates) {
+      setPendingMapImportType(null);
+    }
     
     // 如果已有围栏，预填充坐标
-    if (config.fence) {
+    if (importedCoordinates) {
+      setManualLatitude(importedCoordinates.latitude.toFixed(6));
+      setManualLongitude(importedCoordinates.longitude.toFixed(6));
+    } else if (config.fence) {
       setManualLatitude(config.fence.latitude.toFixed(6));
       setManualLongitude(config.fence.longitude.toFixed(6));
     } else if (currentLocation) {
@@ -311,9 +399,78 @@ export const LocationConfigScreen: React.FC = () => {
     setShowManualInput(true);
   };
 
+  const applyImportedLocationText = useCallback((
+    rawText: string,
+    targetType: FenceConfigType,
+    options?: {
+      successTitle?: string;
+      failureTitle?: string;
+    }
+  ): boolean => {
+    const normalizedText = rawText.trim();
+    if (!normalizedText) {
+      Alert.alert(
+        options?.failureTitle ?? '没有可导入的内容',
+        '请粘贴坐标、地图链接，或从地图应用把位置文本分享到 SceneLens。'
+      );
+      return false;
+    }
+
+    const importedCoordinates = extractCoordinatesFromText(normalizedText);
+    setPendingMapImportType(null);
+
+    if (!importedCoordinates) {
+      openManualInput(targetType, undefined, normalizedText);
+      Alert.alert(
+        options?.failureTitle ?? '无法自动解析',
+        '已把共享内容带回导入框。你可以继续粘贴或整理成经纬度后再保存。'
+      );
+      return false;
+    }
+
+    openManualInput(targetType, importedCoordinates, normalizedText);
+    Alert.alert(
+      options?.successTitle ?? '坐标已导入',
+      `${importedCoordinates.latitude.toFixed(6)}, ${importedCoordinates.longitude.toFixed(6)}`
+    );
+    return true;
+  }, [openManualInput]);
+
   /**
    * 验证经纬度输入
    */
+  const consumePendingLocationImport = useCallback(async () => {
+    try {
+      const payload = await sceneBridge.consumePendingLocationImport();
+      if (!payload?.rawText) {
+        return;
+      }
+
+      const targetType = pendingMapImportType ?? manualInputType ?? selectedTab;
+      applyImportedLocationText(payload.rawText, targetType, {
+        successTitle: '已从分享内容导入',
+        failureTitle: '分享内容未能自动解析',
+      });
+      return;
+    } catch (error) {
+      console.error('导入地图坐标失败:', error);
+    }
+  }, [applyImportedLocationText, manualInputType, pendingMapImportType, selectedTab]);
+
+  useEffect(() => {
+    void consumePendingLocationImport();
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void consumePendingLocationImport();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [consumePendingLocationImport]);
+
   const validateCoordinates = (lat: string, lng: string): { valid: boolean; error?: string } => {
     const latNum = parseFloat(lat);
     const lngNum = parseFloat(lng);
@@ -384,6 +541,7 @@ export const LocationConfigScreen: React.FC = () => {
       await silentContextEngine.refreshGeoConfiguration();
 
       setShowManualInput(false);
+      setImportSourceText('');
       Alert.alert('成功', `${config.displayName}位置已更新`);
     } catch (error) {
       console.error('保存坐标失败:', error);
@@ -400,6 +558,10 @@ export const LocationConfigScreen: React.FC = () => {
     const config = fenceConfigs[type];
     const lat = config.fence?.latitude ?? currentLocation?.latitude ?? 39.9042;
     const lng = config.fence?.longitude ?? currentLocation?.longitude ?? 116.4074;
+
+    setSelectedTab(type);
+    setManualInputType(type);
+    setPendingMapImportType(type);
 
     // 地图应用的 deeplink 配置
     const mapApps = [
@@ -428,32 +590,32 @@ export const LocationConfigScreen: React.FC = () => {
         webUrl: `https://www.google.com/maps?q=${lat},${lng}`,
       },
     ];
+    const mapAppButtons = mapApps.map(app => ({
+      text: app.name,
+      onPress: async () => {
+        try {
+          const canOpen = await Linking.canOpenURL(app.deeplink);
+          if (canOpen) {
+            await Linking.openURL(app.deeplink);
+          } else {
+            await Linking.openURL(app.webUrl);
+          }
+        } catch (error) {
+          console.error(`打开${app.name}失败:`, error);
+          Alert.alert('提示', `无法打开${app.name}，请确认已安装该应用`);
+        }
+      },
+    }));
 
-    // 显示地图应用选择对话框
     Alert.alert(
-      '选择地图应用',
-      '请选择要打开的地图应用来选择位置。\n\n提示：选择位置后，请复制坐标并使用"手动输入"功能填入。',
+      '打开地图查看或复制坐标',
+      '该入口只会打开地图方便查看、复制坐标，或把地图链接/文本分享到 SceneLens；不会自动选点回传。\n\n如果地图支持“分享为文本/链接到 SceneLens”，返回后会自动尝试导入。',
       [
-        ...mapApps.map(app => ({
-          text: app.name,
-          onPress: async () => {
-            try {
-              const canOpen = await Linking.canOpenURL(app.deeplink);
-              if (canOpen) {
-                await Linking.openURL(app.deeplink);
-              } else {
-                // 尝试打开网页版
-                await Linking.openURL(app.webUrl);
-              }
-            } catch (error) {
-              console.error(`打开${app.name}失败:`, error);
-              Alert.alert('提示', `无法打开${app.name}，请确保已安装该应用`);
-            }
-          },
-        })),
+        ...mapAppButtons,
         { text: '取消', style: 'cancel' },
       ]
     );
+    return;
   };
 
   /**
@@ -492,6 +654,28 @@ export const LocationConfigScreen: React.FC = () => {
     }
 
     return null;
+  };
+
+  const importFromPastedText = async () => {
+    try {
+      Keyboard.dismiss();
+      applyImportedLocationText(importSourceText, manualInputType, {
+        successTitle: '已从粘贴内容导入',
+        failureTitle: '粘贴内容未能自动解析',
+      });
+    } catch (error) {
+      console.error('粘贴导入失败:', error);
+    }
+  };
+
+  const fillManualCoordinatesFromCurrentLocation = async () => {
+    const location = currentLocation ?? await loadCurrentLocation({ requestPermission: true });
+    if (!location) {
+      return;
+    }
+
+    setManualLatitude(location.latitude.toFixed(6));
+    setManualLongitude(location.longitude.toFixed(6));
   };
 
   /**
@@ -606,7 +790,7 @@ export const LocationConfigScreen: React.FC = () => {
                 <Button
                   mode="outlined"
                   onPress={() => setCurrentLocationAsFence(type)}
-                  disabled={!currentLocation || isLoading}
+                  disabled={isLoading}
                   icon="crosshairs-gps"
                   style={styles.actionButton}
                   compact
@@ -633,7 +817,7 @@ export const LocationConfigScreen: React.FC = () => {
                   style={styles.actionButton}
                   compact
                 >
-                  从地图选择
+                  地图查看/复制
                 </Button>
                 <Button
                   mode="text"
@@ -656,7 +840,7 @@ export const LocationConfigScreen: React.FC = () => {
                 <Button
                   mode="contained"
                   onPress={() => setCurrentLocationAsFence(type)}
-                  disabled={!currentLocation || isLoading}
+                  disabled={isLoading}
                   icon="crosshairs-gps"
                   style={styles.setupButton}
                   compact
@@ -681,10 +865,23 @@ export const LocationConfigScreen: React.FC = () => {
                 icon="map-search"
                 style={{ marginTop: 8 }}
               >
-                从地图应用选择位置
+                打开地图查看/复制坐标
               </Button>
             </View>
           )}
+          <View style={styles.currentLocationActions}>
+            <Button
+              mode="contained"
+              onPress={() => setCurrentLocationAsFence(selectedTab)}
+              disabled={isLoading}
+              icon="crosshairs-gps"
+            >
+              设为 {currentConfig.displayName}
+            </Button>
+          </View>
+          <Text variant="bodySmall" style={styles.currentLocationHint}>
+            主路径：优先使用当前位置导入；也支持手动输入，以及粘贴/分享地图坐标或链接。
+          </Text>
         </Card.Content>
       </Card>
     );
@@ -775,7 +972,7 @@ export const LocationConfigScreen: React.FC = () => {
             • 围栏半径决定了触发范围，建议根据实际情况调整
           </Text>
           <Text variant="bodyMedium" style={styles.infoText}>
-            • 支持从地图应用选择位置或手动输入经纬度
+            • 优先使用当前位置导入，也支持手动输入，以及粘贴/分享地图坐标或链接
           </Text>
           <Text variant="bodyMedium" style={styles.infoText}>
             • 位置信息仅在本地使用，不会上传到服务器
@@ -832,17 +1029,47 @@ export const LocationConfigScreen: React.FC = () => {
             />
 
             <Text variant="bodySmall" style={styles.coordinateHint}>
-              💡 提示：可以从地图应用中获取精确坐标，格式为"纬度, 经度"
+              💡 提示：可以直接使用当前位置，也可以粘贴坐标、地图链接，或从地图应用把位置内容分享回 SceneLens。
             </Text>
 
             <View style={styles.modalActions}>
+              <Button
+                mode="outlined"
+                onPress={fillManualCoordinatesFromCurrentLocation}
+                icon="crosshairs-gps"
+                style={styles.modalButton}
+              >
+                用当前位置填充
+              </Button>
               <Button
                 mode="outlined"
                 onPress={() => openMapForLocationPick(manualInputType)}
                 icon="map-search"
                 style={styles.modalButton}
               >
-                从地图获取
+                地图查看/复制
+              </Button>
+            </View>
+
+            <TextInput
+              label="粘贴地图链接或分享文本"
+              value={importSourceText}
+              onChangeText={setImportSourceText}
+              placeholder="例如: 39.9042,116.4074 或地图分享链接"
+              style={styles.input}
+              mode="outlined"
+              multiline
+            />
+
+            <View style={styles.modalActions}>
+              <Button
+                mode="outlined"
+                onPress={importFromPastedText}
+                disabled={!importSourceText.trim()}
+                icon="content-paste"
+                style={styles.modalButton}
+              >
+                解析粘贴/分享内容
               </Button>
               <Button
                 mode="contained"
@@ -921,6 +1148,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 16,
     opacity: 0.6,
+  },
+  currentLocationActions: {
+    marginTop: 12,
+  },
+  currentLocationHint: {
+    marginTop: 8,
+    opacity: 0.7,
+    lineHeight: 18,
   },
   sectionTitle: {
     fontWeight: '700',

@@ -24,6 +24,7 @@ import {
   PermissionStatus,
   PERMISSION_GROUPS as PM_GROUPS,
 } from '../utils/PermissionManager';
+import sceneBridge from '../core/SceneBridge';
 import { spacing } from '../theme/spacing';
 
 // ==================== 权限配置 ====================
@@ -43,6 +44,7 @@ const PERMISSION_GROUPS = [
     description: '这些权限可以提升使用体验',
     permissions: [
       PermissionType.LOCATION_BACKGROUND, 
+      PermissionType.BATTERY_OPTIMIZATION,
       PermissionType.CALENDAR_READ
     ],
   },
@@ -85,20 +87,40 @@ export const PermissionsScreen: React.FC = () => {
     requesting,
     requestPermission,
     requestRequiredPermissions,
+    openSettings,
     openPermissionSettings,
     refreshAll,
   } = usePermissions();
 
   const [refreshing, setRefreshing] = useState(false);
   const [showBanner, setShowBanner] = useState(true);
+  const [backgroundRestricted, setBackgroundRestricted] = useState(false);
+  const [powerSaveModeEnabled, setPowerSaveModeEnabled] = useState(false);
+
+  const loadBackgroundExecutionStatus = async () => {
+    try {
+      const [restricted, powerSave] = await Promise.all([
+        sceneBridge.isBackgroundRestricted(),
+        sceneBridge.isPowerSaveModeEnabled(),
+      ]);
+      setBackgroundRestricted(restricted);
+      setPowerSaveModeEnabled(powerSave);
+    } catch (error) {
+      console.warn('[PermissionsScreen] Failed to load background execution status:', error);
+      setBackgroundRestricted(false);
+      setPowerSaveModeEnabled(false);
+    }
+  };
 
   useEffect(() => {
-    refreshAll();
+    void refreshAll();
+    void loadBackgroundExecutionStatus();
   }, [refreshAll]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     await refreshAll();
+    await loadBackgroundExecutionStatus();
     setRefreshing(false);
   };
 
@@ -114,11 +136,23 @@ export const PermissionsScreen: React.FC = () => {
     await requestRequiredPermissions();
   };
 
+  const handleBackgroundPolicyReview = async () => {
+    if (powerSaveModeEnabled) {
+      const opened = await sceneBridge.openBatterySaverSettings();
+      if (opened) {
+        return;
+      }
+    }
+
+    await openSettings();
+  };
+
   const getPermissionIcon = (permission: PermissionType): string => {
     const icons: Record<PermissionType, string> = {
       [PermissionType.LOCATION_FINE]: 'map-marker',
       [PermissionType.LOCATION_COARSE]: 'map-marker-outline',
       [PermissionType.LOCATION_BACKGROUND]: 'map-marker-radius',
+      [PermissionType.BATTERY_OPTIMIZATION]: 'battery-heart-variant',
       [PermissionType.CALENDAR_READ]: 'calendar',
       [PermissionType.CALENDAR_WRITE]: 'calendar-edit',
       [PermissionType.ACTIVITY_RECOGNITION]: 'run',
@@ -223,6 +257,14 @@ export const PermissionsScreen: React.FC = () => {
     p => permissions.get(p)?.status === PermissionStatus.GRANTED
   ).length;
   const totalProgress = Math.round((grantedTotal / allPermissions.length) * 100);
+  const backgroundLocationStatus =
+    permissions.get(PermissionType.LOCATION_BACKGROUND)?.status ?? PermissionStatus.UNDETERMINED;
+  const batteryOptimizationStatus =
+    permissions.get(PermissionType.BATTERY_OPTIMIZATION)?.status ?? PermissionStatus.UNDETERMINED;
+  const showBackgroundExecutionWarning =
+    backgroundLocationStatus === PermissionStatus.GRANTED &&
+    batteryOptimizationStatus !== PermissionStatus.GRANTED;
+  const showBackgroundPolicyWarning = backgroundRestricted || powerSaveModeEnabled;
 
   return (
     <ScrollView
@@ -253,6 +295,36 @@ export const PermissionsScreen: React.FC = () => {
       )}
 
       {/* 加载指示器 */}
+      {showBackgroundExecutionWarning && (
+        <Banner
+          visible
+          actions={[
+            {
+              label: '去设置',
+              onPress: () => handleRequestPermission(PermissionType.BATTERY_OPTIMIZATION),
+            },
+          ]}
+          icon="battery-alert"
+        >
+          后台位置已经授权，但系统省电策略仍可能提前限制原生前台服务和恢复链路。建议将 SceneLens 加入电池优化白名单。
+        </Banner>
+      )}
+
+      {showBackgroundPolicyWarning && (
+          <Banner
+            visible
+            actions={[
+              {
+                label: 'Review',
+                onPress: handleBackgroundPolicyReview,
+              },
+            ]}
+            icon="alert-octagon"
+          >
+            Android background policy is currently restrictive. {backgroundRestricted ? 'App background restriction is active. ' : ''}{powerSaveModeEnabled ? 'System power saver is enabled.' : ''}
+          </Banner>
+        )}
+
       {checking && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" />

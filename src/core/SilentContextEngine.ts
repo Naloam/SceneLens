@@ -89,6 +89,9 @@ interface PermissionCache {
  * 静默感知引擎，负责收集各种上下文信号并推断当前场景
  */
 export class SilentContextEngine {
+  private readonly maxReliableLocationAgeMs = 10 * 60 * 1000;
+  private readonly maxReusableLocationAgeMs = 30 * 60 * 1000;
+  private readonly maxReliableLocationAccuracyMeters = 200;
   /**
    * 采样间隔配置
    */
@@ -418,19 +421,42 @@ export class SilentContextEngine {
         return null;
       }
 
+      const ageMs = this.getLocationAgeMs(location);
+      if (ageMs > this.maxReusableLocationAgeMs) {
+        return null;
+      }
+
       const locationType = this.classifyLocation(location);
+      const isFresh = this.isLocationFresh(location, ageMs);
+
+      if (locationType === 'UNKNOWN' && !isFresh) {
+        return null;
+      }
 
       // 仅使用位置类型用于规则匹配和场景映射，避免附带坐标导致匹配失败
       const locationLabel = locationType;
+      let weight = 0.8;
+      if (!isFresh) {
+        weight *= 0.45;
+      }
+      if (location.accuracy > this.maxReliableLocationAccuracyMeters) {
+        weight *= 0.6;
+      }
 
       // 即使位置类型是 UNKNOWN，也返回信号（因为位置坐标是有效的）
       // 只返回类型字符串，坐标由引擎内部使用，不参与规则匹配
-      return {
+      const signal: ContextSignal = {
         type: 'LOCATION',
         value: locationLabel,
         weight: 0.8, // 位置信号权重较高
         timestamp: Date.now(),
       };
+      signal.weight = weight;
+      (signal as any).isFresh = isFresh;
+      (signal as any).ageMs = ageMs;
+      (signal as any).source = (location as any).source ?? 'location';
+      (signal as any).accuracy = location.accuracy;
+      return signal;
     } catch (error) {
       console.warn('Failed to get location signal:', error);
       return null;
@@ -493,6 +519,24 @@ export class SilentContextEngine {
     return deg * (Math.PI / 180);
   }
 
+  private getLocationAgeMs(location: Location): number {
+    const ageMs = (location as any).ageMs;
+    if (typeof ageMs === 'number' && Number.isFinite(ageMs)) {
+      return Math.max(0, ageMs);
+    }
+
+    return Math.max(0, Date.now() - location.timestamp);
+  }
+
+  private isLocationFresh(location: Location, ageMs = this.getLocationAgeMs(location)): boolean {
+    if ((location as any).isStale === true) {
+      return false;
+    }
+
+    return ageMs <= this.maxReliableLocationAgeMs
+      && location.accuracy <= this.maxReliableLocationAccuracyMeters;
+  }
+
   /**
    * 获取 WiFi 信号
    * 
@@ -511,12 +555,15 @@ export class SilentContextEngine {
       // 检查是否为已知 WiFi
       const locationType = this.knownWiFiMap.get(wifiInfo.ssid) || 'UNKNOWN';
 
-      return {
+      const signal: ContextSignal = {
         type: 'WIFI',
         value: locationType !== 'UNKNOWN' ? locationType : wifiInfo.ssid,
         weight: locationType !== 'UNKNOWN' ? 0.9 : 0.3, // 已知 WiFi 权重更高
         timestamp: Date.now(),
       };
+      (signal as any).isFresh = true;
+      (signal as any).source = 'wifi';
+      return signal;
     } catch (error) {
       console.warn('Failed to get WiFi signal:', error);
       return null;
@@ -660,8 +707,8 @@ export class SilentContextEngine {
 
       // 判断信号强度
       const isStrongSignal = 
-        (signal.type === 'LOCATION' && !signal.value.includes('UNKNOWN')) ||
-        (signal.type === 'WIFI' && !signal.value.includes('UNKNOWN'));
+        (signal.type === 'LOCATION' && !signal.value.includes('UNKNOWN') && (signal as any).isFresh !== false) ||
+        (signal.type === 'WIFI' && !signal.value.includes('UNKNOWN') && (signal as any).isFresh !== false);
       
       const isTimeSignal = signal.type === 'TIME';
       const isUnknownSignal = signal.value.includes('UNKNOWN');

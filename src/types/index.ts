@@ -59,6 +59,10 @@ export interface Location {
   longitude: number;
   accuracy: number;    // 精度（米）
   timestamp: number;
+  ageMs?: number;
+  isStale?: boolean;
+  source?: string;
+  provider?: string;
 }
 
 /**

@@ -4,7 +4,8 @@
  * 提供权限管理的 React Hook 封装
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { 
   permissionManager, 
   PermissionType, 
@@ -43,6 +44,13 @@ export interface UsePermissionsReturn {
   allRequiredGranted: boolean;
 }
 
+export function shouldRefreshPermissionsOnForeground(
+  previousAppState: AppStateStatus,
+  nextAppState: AppStateStatus
+): boolean {
+  return previousAppState !== 'active' && nextAppState === 'active';
+}
+
 /**
  * 权限管理 Hook
  * 
@@ -56,6 +64,7 @@ export function usePermissions(
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [allRequiredGranted, setAllRequiredGranted] = useState(false);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState ?? 'active');
 
   // 检查是否所有必需权限已授权
   const checkAllRequiredGranted = useCallback((perms: Map<PermissionType, PermissionCheckResult>) => {
@@ -217,6 +226,23 @@ export function usePermissions(
     const allPermissionTypes = Object.values(PermissionType);
     await checkPermissions(allPermissionTypes);
   }, [checkPermissions]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      const previousAppState = appStateRef.current;
+      appStateRef.current = nextAppState;
+
+      if (shouldRefreshPermissionsOnForeground(previousAppState, nextAppState)) {
+        void refreshAll().catch((err) => {
+          setError((err as Error).message);
+        });
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [refreshAll]);
 
   return {
     permissions,

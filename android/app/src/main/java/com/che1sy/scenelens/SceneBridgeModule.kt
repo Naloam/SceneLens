@@ -3,6 +3,7 @@ package com.che1sy.scenelens
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlarmManager
+import android.app.ActivityManager
 import android.app.AppOpsManager
 import android.app.NotificationManager
 import android.content.Context
@@ -47,17 +48,22 @@ import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionClient
 import com.google.android.gms.location.ActivityRecognitionResult
 import com.google.android.gms.location.DetectedActivity
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.WritableMap
 import com.facebook.react.module.annotations.ReactModule
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.Calendar
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.Semaphore
 
@@ -70,6 +76,11 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
     private const val MOTION_INTENT_ACTION = "com.che1sy.scenelens.MOTION_UPDATE"
     private const val MOTION_REQUEST_CODE = 2024
     private const val VOLUME_KEY_DOUBLE_TAP_TIMEOUT = 500L // 500ms for double tap detection
+    private const val LOCATION_IMPORT_CONSUMED_EXTRA = "com.che1sy.scenelens.LOCATION_IMPORT_CONSUMED"
+    private const val LOCATION_FRESH_MAX_AGE_MS = 2 * 60 * 1000L
+    private const val LOCATION_MAX_REUSE_AGE_MS = 30 * 60 * 1000L
+    private const val CURRENT_LOCATION_TIMEOUT_MS = 6000L
+    private const val LOCATION_ACCURACY_DECISION_THRESHOLD_METERS = 150f
   }
 
   override fun getName() = NAME
@@ -127,6 +138,10 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
 
   private val activityRecognitionClient: ActivityRecognitionClient by lazy {
     ActivityRecognition.getClient(ctx)
+  }
+
+  private val fusedLocationClient by lazy {
+    LocationServices.getFusedLocationProviderClient(ctx)
   }
 
   private var motionUpdatesRequested: Boolean = false
@@ -195,6 +210,221 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   private fun permissionGranted(vararg perms: String): Boolean =
     perms.all { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
 
+  private fun getLocationAgeMs(location: Location): Long =
+    (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+
+  private fun isFreshLocation(location: Location): Boolean =
+    getLocationAgeMs(location) <= LOCATION_FRESH_MAX_AGE_MS
+
+  private fun chooseBetterLocation(currentBest: Location?, candidate: Location?): Location? {
+    if (candidate == null) return currentBest
+    if (currentBest == null) return candidate
+
+    val candidateAge = getLocationAgeMs(candidate)
+    val currentAge = getLocationAgeMs(currentBest)
+
+    return when {
+      candidateAge + 60_000L < currentAge -> candidate
+      currentAge + 60_000L < candidateAge -> currentBest
+      candidate.accuracy <= currentBest.accuracy -> candidate
+      else -> currentBest
+    }
+  }
+
+  private fun isSameLocation(left: Location?, right: Location?): Boolean {
+    if (left == null || right == null) return false
+    return left.time == right.time
+      && left.latitude == right.latitude
+      && left.longitude == right.longitude
+      && left.provider == right.provider
+  }
+
+  private fun getForegroundServiceLocation(): Location? {
+    val snapshot = SceneLocationForegroundService.getLastLocationSnapshot() ?: return null
+    val location = snapshot.toLocation()
+    return location.takeIf { getLocationAgeMs(it) <= LOCATION_MAX_REUSE_AGE_MS }
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun awaitFusedLastLocation(): Location? {
+    val latch = CountDownLatch(1)
+    var location: Location? = null
+
+    fusedLocationClient.lastLocation
+      .addOnSuccessListener {
+        location = it
+        latch.countDown()
+      }
+      .addOnFailureListener { error ->
+        Log.w(LOG_TAG, "Failed to read fused last location: ${error.message}")
+        latch.countDown()
+      }
+      .addOnCanceledListener {
+        latch.countDown()
+      }
+
+    latch.await(1500L, TimeUnit.MILLISECONDS)
+    return location
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun getBestLastKnownLocation(): Location? {
+    val locationManager = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+    var best: Location? = null
+
+    for (provider in providers) {
+      val location = try {
+        locationManager.getLastKnownLocation(provider)
+      } catch (error: SecurityException) {
+        Log.w(LOG_TAG, "Missing permission for provider $provider: ${error.message}")
+        null
+      } catch (error: Throwable) {
+        Log.w(LOG_TAG, "Failed to read provider $provider: ${error.message}")
+        null
+      }
+
+      best = chooseBetterLocation(best, location)
+    }
+
+    best = chooseBetterLocation(best, awaitFusedLastLocation())
+    return best?.takeIf { getLocationAgeMs(it) <= LOCATION_MAX_REUSE_AGE_MS }
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun requestFreshLocation(lastKnownLocation: Location?): Location? {
+    val latch = CountDownLatch(1)
+    val cancellationTokenSource = CancellationTokenSource()
+    val timeoutHandler = Handler(Looper.getMainLooper())
+    val timeoutRunnable = Runnable {
+      cancellationTokenSource.cancel()
+      latch.countDown()
+    }
+
+    var location: Location? = null
+    val priority = if (
+      lastKnownLocation == null ||
+      getLocationAgeMs(lastKnownLocation) > LOCATION_FRESH_MAX_AGE_MS ||
+      lastKnownLocation.accuracy > LOCATION_ACCURACY_DECISION_THRESHOLD_METERS
+    ) {
+      Priority.PRIORITY_HIGH_ACCURACY
+    } else {
+      Priority.PRIORITY_BALANCED_POWER_ACCURACY
+    }
+
+    try {
+      timeoutHandler.postDelayed(timeoutRunnable, CURRENT_LOCATION_TIMEOUT_MS)
+      fusedLocationClient.getCurrentLocation(priority, cancellationTokenSource.token)
+        .addOnSuccessListener {
+          location = it
+          latch.countDown()
+        }
+        .addOnFailureListener { error ->
+          Log.w(LOG_TAG, "Failed to get fresh location: ${error.message}")
+          latch.countDown()
+        }
+        .addOnCanceledListener {
+          latch.countDown()
+        }
+
+      latch.await(CURRENT_LOCATION_TIMEOUT_MS + 1000L, TimeUnit.MILLISECONDS)
+    } catch (error: InterruptedException) {
+      Thread.currentThread().interrupt()
+      Log.w(LOG_TAG, "Interrupted while waiting for current location", error)
+    } finally {
+      timeoutHandler.removeCallbacks(timeoutRunnable)
+    }
+
+    return location
+  }
+
+  private fun toWritableLocation(location: Location, source: String): WritableMap {
+    val ageMs = getLocationAgeMs(location)
+    return Arguments.createMap().apply {
+      putDouble("latitude", location.latitude)
+      putDouble("longitude", location.longitude)
+      putDouble("accuracy", location.accuracy.toDouble())
+      putDouble("timestamp", location.time.toDouble())
+      putDouble("ageMs", ageMs.toDouble())
+      putBoolean("isStale", ageMs > LOCATION_FRESH_MAX_AGE_MS)
+      putString("source", source)
+      putString("provider", location.provider ?: source)
+    }
+  }
+
+  private fun chooseLatestSnapshot(
+    current: SceneLocationForegroundService.LocationSnapshot?,
+    persisted: SceneLocationForegroundService.LocationSnapshot?,
+  ): SceneLocationForegroundService.LocationSnapshot? {
+    if (current == null) return persisted
+    if (persisted == null) return current
+    return if (current.timestamp >= persisted.timestamp) current else persisted
+  }
+
+  private fun putOptionalTimestamp(map: WritableMap, key: String, value: Long?) {
+    if (value != null && value > 0L) {
+      map.putDouble(key, value.toDouble())
+    } else {
+      map.putNull(key)
+    }
+  }
+
+  private fun buildBackgroundLocationServiceStatusMap(): WritableMap {
+    val recoveryState = BackgroundLocationRecoveryStore.read(ctx)
+    val queueStatus = SceneLocationRecoveryWorker.readQueueStatus(ctx)
+    val executionPolicy = BackgroundExecutionPolicy.read(ctx)
+    val snapshot = chooseLatestSnapshot(
+      SceneLocationForegroundService.getLastLocationSnapshot(),
+      recoveryState.telemetry.lastLocation,
+    )
+    val serviceRunning = SceneLocationForegroundService.isServiceRunning()
+    val intervalMs = if (serviceRunning) {
+      SceneLocationForegroundService.getRequestedIntervalMs()
+    } else {
+      recoveryState.serviceIntervalMs
+    }
+
+    return Arguments.createMap().apply {
+      putBoolean("running", serviceRunning)
+      putDouble("intervalMs", intervalMs.toDouble())
+      putBoolean("recoveryEnabled", recoveryState.enabled)
+      putDouble("recoveryIntervalMs", recoveryState.intervalMs.toDouble())
+      putMap("executionPolicy", Arguments.createMap().apply {
+        putBoolean("batteryOptimizationIgnored", executionPolicy.batteryOptimizationIgnored)
+        putBoolean("backgroundRestricted", executionPolicy.backgroundRestricted)
+        putBoolean("powerSaveModeEnabled", executionPolicy.powerSaveModeEnabled)
+      })
+      if (snapshot != null) {
+        putMap("lastLocation", toWritableLocation(snapshot.toLocation(), snapshot.source))
+      } else {
+        putNull("lastLocation")
+      }
+      putMap("telemetry", Arguments.createMap().apply {
+        putString("lastStartReason", recoveryState.telemetry.lastStartReason)
+        putOptionalTimestamp(this, "lastStartAt", recoveryState.telemetry.lastStartAt)
+        putString("lastStopReason", recoveryState.telemetry.lastStopReason)
+        putOptionalTimestamp(this, "lastStopAt", recoveryState.telemetry.lastStopAt)
+        putString("lastRecoveryReason", recoveryState.telemetry.lastRecoveryReason)
+        putOptionalTimestamp(this, "lastRecoveryAt", recoveryState.telemetry.lastRecoveryAt)
+        putOptionalTimestamp(this, "lastRecoveryScheduleAt", recoveryState.telemetry.lastRecoveryScheduleAt)
+        putOptionalTimestamp(this, "nextRecoveryDueAt", recoveryState.telemetry.nextRecoveryDueAt)
+        putString("nextRecoveryKind", recoveryState.telemetry.nextRecoveryKind)
+        putString("immediateWorkerState", queueStatus.immediateWorkerState)
+        putInt("immediateWorkerRunAttemptCount", queueStatus.immediateWorkerRunAttemptCount)
+        putString("periodicWorkerState", queueStatus.periodicWorkerState)
+        putInt("periodicWorkerRunAttemptCount", queueStatus.periodicWorkerRunAttemptCount)
+        putOptionalTimestamp(this, "lastWorkerRunAt", recoveryState.telemetry.lastWorkerRunAt)
+        putString("lastWorkerOutcome", recoveryState.telemetry.lastWorkerOutcome)
+        putString("lastWorkerDetail", recoveryState.telemetry.lastWorkerDetail)
+        putString("lastFailureReason", recoveryState.telemetry.lastFailureReason)
+        putOptionalTimestamp(this, "lastFailureAt", recoveryState.telemetry.lastFailureAt)
+        putString("lastPolicyBlockerReason", recoveryState.telemetry.lastPolicyBlockerReason)
+        putOptionalTimestamp(this, "lastPolicyBlockerAt", recoveryState.telemetry.lastPolicyBlockerAt)
+        putInt("restartCount", recoveryState.telemetry.restartCount)
+      })
+    }
+  }
+
   private fun requestPermissions(perms: Array<String>): Boolean {
     val activity = ctx.currentActivity ?: getCurrentActivity() ?: return false
     ActivityCompat.requestPermissions(activity, perms, 1010)
@@ -225,32 +455,134 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
           promise.reject("ERR_NO_PERMISSION", "Location permission not granted")
           return@Thread
         }
-        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
-        var best: Location? = null
-        for (p in providers) {
-          val loc = lm.getLastKnownLocation(p)
-          if (loc != null && (best == null || loc.accuracy < best!!.accuracy)) {
-            best = loc
+        val lastKnownLocation = getBestLastKnownLocation()
+        val foregroundServiceLocation = getForegroundServiceLocation()
+        val bestCachedLocation = chooseBetterLocation(lastKnownLocation, foregroundServiceLocation)
+
+        if (bestCachedLocation != null && isFreshLocation(bestCachedLocation)) {
+          val source = if (isSameLocation(bestCachedLocation, foregroundServiceLocation)) {
+            "foreground_service"
+          } else {
+            "last_known"
           }
+          android.util.Log.d(
+            "SceneBridge",
+            "Using fresh cached location: ${bestCachedLocation.latitude}, ${bestCachedLocation.longitude}, age=${getLocationAgeMs(bestCachedLocation)}ms, accuracy=${bestCachedLocation.accuracy}, source=$source"
+          )
+          promise.resolve(toWritableLocation(bestCachedLocation, source))
+          return@Thread
         }
-        if (best == null) {
+
+        val freshLocation = requestFreshLocation(bestCachedLocation)
+        val resolvedLocation = chooseBetterLocation(bestCachedLocation, freshLocation)
+
+        if (resolvedLocation == null) {
           android.util.Log.w("SceneBridge", "No location available from providers")
           promise.resolve(null)
           return@Thread
         }
-        android.util.Log.d("SceneBridge", "Got location: ${best.latitude}, ${best.longitude}, accuracy: ${best.accuracy}")
-        val map = Arguments.createMap().apply {
-          putDouble("latitude", best.latitude)
-          putDouble("longitude", best.longitude)
-          putDouble("accuracy", best.accuracy.toDouble())
+
+        val source = if (isSameLocation(resolvedLocation, freshLocation)) {
+          "current"
+        } else if (isSameLocation(resolvedLocation, foregroundServiceLocation)) {
+          "foreground_service"
+        } else {
+          "last_known"
         }
-        promise.resolve(map)
+
+        android.util.Log.d(
+          "SceneBridge",
+          "Got location: ${resolvedLocation.latitude}, ${resolvedLocation.longitude}, age=${getLocationAgeMs(resolvedLocation)}ms, accuracy=${resolvedLocation.accuracy}, source=$source"
+        )
+        promise.resolve(toWritableLocation(resolvedLocation, source))
       } catch (t: Throwable) {
         android.util.Log.e("SceneBridge", "Error getting location", t)
         promise.reject("ERR_LOCATION", t.message)
       }
     }.start()
+  }
+
+  @ReactMethod
+  fun configureBackgroundLocationRecovery(enabled: Boolean, intervalMs: Double, promise: Promise) {
+    try {
+      val boundedIntervalMs = intervalMs.toLong().coerceAtLeast(60_000L)
+      BackgroundLocationRecoveryStore.write(ctx, enabled, boundedIntervalMs)
+
+      if (enabled) {
+        SceneLocationRecoveryWorker.schedule(ctx, boundedIntervalMs)
+      } else {
+        SceneLocationRecoveryWorker.cancel(ctx)
+      }
+
+      promise.resolve(true)
+    } catch (t: Throwable) {
+      Log.e(LOG_TAG, "Failed to configure background location recovery", t)
+      promise.reject("ERR_BACKGROUND_LOCATION_RECOVERY", t.message)
+    }
+  }
+
+  @ReactMethod
+  fun startBackgroundLocationService(intervalMs: Double, promise: Promise) {
+    try {
+      if (!permissionGranted(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)) {
+        promise.reject("ERR_NO_PERMISSION", "Foreground location service requires location permission")
+        return
+      }
+
+      if (
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+        !permissionGranted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+      ) {
+        promise.reject("ERR_BACKGROUND_LOCATION_REQUIRED", "Background location permission is required")
+        return
+      }
+
+      val boundedIntervalMs = intervalMs.toLong().coerceAtLeast(60_000L)
+      BackgroundLocationRecoveryStore.recordServiceInterval(ctx, boundedIntervalMs)
+      val intent = SceneLocationForegroundService.buildStartIntent(
+        ctx,
+        boundedIntervalMs,
+        SceneLocationForegroundService.START_REASON_MANUAL,
+      )
+
+      if (SceneLocationForegroundService.isServiceRunning()) {
+        ctx.startService(intent)
+      } else {
+        ContextCompat.startForegroundService(ctx, intent)
+      }
+
+      promise.resolve(buildBackgroundLocationServiceStatusMap())
+    } catch (t: Throwable) {
+      Log.e(LOG_TAG, "Failed to start background location foreground service", t)
+      promise.reject("ERR_BACKGROUND_LOCATION_SERVICE", t.message)
+    }
+  }
+
+  @ReactMethod
+  fun stopBackgroundLocationService(promise: Promise) {
+    try {
+      val stopped = if (SceneLocationForegroundService.isServiceRunning()) {
+        ctx.startService(SceneLocationForegroundService.buildStopIntent(ctx))
+        true
+      } else {
+        val serviceIntent = Intent(ctx, SceneLocationForegroundService::class.java)
+        ctx.stopService(serviceIntent) || !SceneLocationForegroundService.isServiceRunning()
+      }
+      promise.resolve(stopped)
+    } catch (t: Throwable) {
+      Log.e(LOG_TAG, "Failed to stop background location foreground service", t)
+      promise.reject("ERR_BACKGROUND_LOCATION_SERVICE", t.message)
+    }
+  }
+
+  @ReactMethod
+  fun getBackgroundLocationServiceStatus(promise: Promise) {
+    try {
+      promise.resolve(buildBackgroundLocationServiceStatusMap())
+    } catch (t: Throwable) {
+      Log.e(LOG_TAG, "Failed to get background location foreground service status", t)
+      promise.reject("ERR_BACKGROUND_LOCATION_SERVICE", t.message)
+    }
   }
 
   @SuppressLint("MissingPermission")
@@ -586,6 +918,99 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   }
 
   @ReactMethod
+  fun isIgnoringBatteryOptimizations(promise: Promise) {
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+        promise.resolve(true)
+        return
+      }
+
+      val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+      promise.resolve(powerManager.isIgnoringBatteryOptimizations(ctx.packageName))
+    } catch (t: Throwable) {
+      promise.reject("ERR_BATTERY_OPT_STATUS", t)
+    }
+  }
+
+  @ReactMethod
+  fun openBatteryOptimizationSettings(promise: Promise) {
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+        promise.resolve(true)
+        return
+      }
+
+      val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+      promise.resolve(true)
+    } catch (t: Throwable) {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun requestIgnoreBatteryOptimizations(promise: Promise) {
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+        promise.resolve(true)
+        return
+      }
+
+      val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+      if (powerManager.isIgnoringBatteryOptimizations(ctx.packageName)) {
+        promise.resolve(true)
+        return
+      }
+
+      val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+        .setData(Uri.parse("package:" + ctx.packageName))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+      promise.resolve(true)
+    } catch (t: Throwable) {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun isBackgroundRestricted(promise: Promise) {
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+        promise.resolve(false)
+        return
+      }
+
+      val activityManager = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+      promise.resolve(activityManager.isBackgroundRestricted)
+    } catch (t: Throwable) {
+      promise.reject("ERR_BACKGROUND_RESTRICTED", t)
+    }
+  }
+
+  @ReactMethod
+  fun isPowerSaveModeEnabled(promise: Promise) {
+    try {
+      val powerManager = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+      promise.resolve(powerManager.isPowerSaveMode)
+    } catch (t: Throwable) {
+      promise.reject("ERR_POWER_SAVE_MODE", t)
+    }
+  }
+
+  @ReactMethod
+  fun openBatterySaverSettings(promise: Promise) {
+    try {
+      val intent = Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+      promise.resolve(true)
+    } catch (t: Throwable) {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
   fun openAppWithDeepLink(packageName: String, deepLink: String?, promise: Promise) {
     try {
       val pm = ctx.packageManager
@@ -769,6 +1194,17 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   }
 
   @ReactMethod
+  fun consumePendingLocationImport(promise: Promise) {
+    try {
+      val activity = ctx.currentActivity ?: getCurrentActivity()
+      val payload = extractPendingLocationImport(activity?.intent, true)
+      promise.resolve(payload)
+    } catch (t: Throwable) {
+      promise.reject("ERR_PENDING_LOCATION_IMPORT", t.message, t)
+    }
+  }
+
+  @ReactMethod
   fun requestLocationPermission(promise: Promise) {
     val ok = permissionGranted(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
     if (ok) {
@@ -829,6 +1265,39 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
     }
     val requested = requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR))
     promise.resolve(requested)
+  }
+
+  private fun extractPendingLocationImport(
+    intent: Intent?,
+    markConsumed: Boolean
+  ): com.facebook.react.bridge.WritableMap? {
+    if (intent == null) return null
+    if (intent.getBooleanExtra(LOCATION_IMPORT_CONSUMED_EXTRA, false)) {
+      return null
+    }
+
+    val rawText = when (intent.action) {
+      Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+        ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
+      Intent.ACTION_VIEW -> intent.dataString
+        ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+        ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
+      else -> intent.getStringExtra(Intent.EXTRA_TEXT)
+        ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
+    }
+
+    if (rawText.isNullOrBlank()) {
+      return null
+    }
+
+    if (markConsumed) {
+      intent.putExtra(LOCATION_IMPORT_CONSUMED_EXTRA, true)
+    }
+
+    return Arguments.createMap().apply {
+      putString("rawText", rawText)
+      putString("source", intent.action ?: "unknown")
+    }
   }
 
   // Camera methods ------------------------------------------

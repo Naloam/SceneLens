@@ -32,6 +32,19 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
 import { useSettingsStore, themeColors, type ThemeColor, type NotificationStyle, type DetectionInterval } from '../stores/settingsStore';
 import { personalizationManager } from '../services/suggestion/PersonalizationManager';
+import sceneBridge, {
+  type BackgroundExecutionPolicyStatus,
+  type BackgroundLocationServiceStatus,
+  type BackgroundLocationServiceTelemetry,
+} from '../core/SceneBridge';
+import {
+  formatPolicyBlockerReason,
+  getRecentPolicyBlockerInsight,
+  performBackgroundRuntimeRepair,
+  resolveBackgroundRuntimeRepairPlan,
+  shouldShowBackgroundRuntimeAlert,
+  type BackgroundRuntimeRepairPlan,
+} from './homeRuntimeAlert';
 
 /**
  * 颜色选择器组件
@@ -159,6 +172,341 @@ const ConfidenceSlider: React.FC<{
 };
 
 type SettingsNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
+type RuntimeLocation = NonNullable<BackgroundLocationServiceStatus['lastLocation']>;
+type RuntimeTelemetry = BackgroundLocationServiceTelemetry;
+
+function resolveRuntimeLocationAgeMs(location: RuntimeLocation): number {
+  if (typeof location.ageMs === 'number' && Number.isFinite(location.ageMs)) {
+    return Math.max(0, location.ageMs);
+  }
+
+  return Math.max(0, Date.now() - location.timestamp);
+}
+
+function formatRuntimeLocationAge(location: RuntimeLocation): string {
+  const ageMs = resolveRuntimeLocationAgeMs(location);
+  if (ageMs < 60_000) {
+    return `${Math.max(1, Math.round(ageMs / 1000))}s ago`;
+  }
+
+  if (ageMs < 60 * 60 * 1000) {
+    return `${Math.round(ageMs / 60_000)}m ago`;
+  }
+
+  return `${(ageMs / (60 * 60 * 1000)).toFixed(1)}h ago`;
+}
+
+function formatRuntimeInterval(intervalMs: number): string {
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return 'off';
+  }
+
+  if (intervalMs < 60_000) {
+    return `${Math.round(intervalMs / 1000)}s`;
+  }
+
+  return `${Math.round(intervalMs / 60_000)}m`;
+}
+
+function formatRuntimeTimestamp(timestamp: number | null | undefined): string {
+  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp <= 0) {
+    return 'never';
+  }
+
+  const ageMs = Math.max(0, Date.now() - timestamp);
+  if (ageMs < 60_000) {
+    return `${Math.max(1, Math.round(ageMs / 1000))}s ago`;
+  }
+
+  if (ageMs < 60 * 60 * 1000) {
+    return `${Math.round(ageMs / 60_000)}m ago`;
+  }
+
+  if (ageMs < 24 * 60 * 60 * 1000) {
+    return `${(ageMs / (60 * 60 * 1000)).toFixed(1)}h ago`;
+  }
+
+  return `${Math.round(ageMs / (24 * 60 * 60 * 1000))}d ago`;
+}
+
+function formatRuntimeDuration(durationMs: number): string {
+  const safeDurationMs = Math.max(0, durationMs);
+  if (safeDurationMs < 60_000) {
+    return `${Math.max(1, Math.round(safeDurationMs / 1000))}s`;
+  }
+
+  if (safeDurationMs < 60 * 60 * 1000) {
+    return `${Math.round(safeDurationMs / 60_000)}m`;
+  }
+
+  if (safeDurationMs < 24 * 60 * 60 * 1000) {
+    return `${(safeDurationMs / (60 * 60 * 1000)).toFixed(1)}h`;
+  }
+
+  return `${Math.round(safeDurationMs / (24 * 60 * 60 * 1000))}d`;
+}
+
+function formatRuntimeReason(
+  reason: string | null | undefined,
+  detail?: string | null
+): string {
+  if (!reason) {
+    return 'unknown';
+  }
+
+  const knownReasons: Record<string, string> = {
+    manual: 'manual start',
+    recovery_worker: 'recovery worker restart',
+    system_restart: 'system service restart',
+    explicit_stop: 'explicit stop',
+    missing_permission: 'missing permission',
+    missing_permissions: 'missing permission',
+    location_request_failed: 'location request failed',
+    worker_missing_permissions: 'worker blocked by missing permissions',
+    worker_tick: 'worker tick',
+    boot_completed: 'boot completed',
+    package_replaced: 'package replaced',
+    task_removed: 'task removed from recents',
+    worker_disabled: 'worker disabled',
+    worker_already_running: 'worker saw service already running',
+  };
+
+  if (knownReasons[reason]) {
+    return knownReasons[reason];
+  }
+
+  if (reason.startsWith('location_updates_start_failed:')) {
+    return `updates start failed (${reason.split(':')[1] ?? 'unknown'})`;
+  }
+
+  if (reason.startsWith('location_request_exception:')) {
+    return `location request exception (${reason.split(':')[1] ?? 'unknown'})`;
+  }
+
+  if (reason.startsWith('worker_restart_failed:')) {
+    return `worker restart failed (${reason.split(':')[1] ?? 'unknown'})`;
+  }
+
+  if (reason === 'worker_restart_requested') {
+    const intervalMs = detail && Number.isFinite(Number(detail)) ? Number(detail) : null;
+    if (intervalMs && intervalMs > 0) {
+      return `worker requested restart (${Math.round(intervalMs / 60_000)}m interval)`;
+    }
+    return 'worker requested restart';
+  }
+
+  if (reason === 'worker_retry_scheduled') {
+    return detail
+      ? `worker scheduled retry (${detail})`
+      : 'worker scheduled retry';
+  }
+
+  return reason.replace(/_/g, ' ');
+}
+
+function formatRecoveryScheduleKind(kind: string | null | undefined): string {
+  if (!kind) {
+    return 'unknown';
+  }
+
+  if (kind === 'immediate') {
+    return 'immediate';
+  }
+
+  if (kind === 'periodic') {
+    return 'periodic';
+  }
+
+  if (kind === 'retry_pending') {
+    return 'retry pending';
+  }
+
+  return kind.replace(/_/g, ' ');
+}
+
+function formatWorkManagerState(
+  state: string | null | undefined,
+  attempts: number | null | undefined
+): string {
+  const normalizedState = state ?? 'none';
+  const safeAttempts = typeof attempts === 'number' && Number.isFinite(attempts)
+    ? Math.max(0, Math.round(attempts))
+    : 0;
+
+  return safeAttempts > 0
+    ? `${normalizedState} / attempts ${safeAttempts}`
+    : normalizedState;
+}
+
+function getRuntimePolicyBlockers(
+  executionPolicy: BackgroundExecutionPolicyStatus | null | undefined
+): string[] {
+  if (!executionPolicy) {
+    return [];
+  }
+
+  const blockers: string[] = [];
+  if (!executionPolicy.batteryOptimizationIgnored) {
+    blockers.push('battery optimization active');
+  }
+  if (executionPolicy.backgroundRestricted) {
+    blockers.push('background restricted');
+  }
+  if (executionPolicy.powerSaveModeEnabled) {
+    blockers.push('battery saver on');
+  }
+  return blockers;
+}
+
+function formatRuntimeExecutionPolicy(
+  executionPolicy: BackgroundExecutionPolicyStatus | null | undefined
+): string {
+  if (!executionPolicy) {
+    return 'unknown';
+  }
+
+  const parts = [
+    executionPolicy.batteryOptimizationIgnored
+      ? 'battery optimization exempt'
+      : 'battery optimization active',
+    executionPolicy.backgroundRestricted
+      ? 'background restricted'
+      : 'background unrestricted',
+    executionPolicy.powerSaveModeEnabled
+      ? 'battery saver on'
+      : 'battery saver off',
+  ];
+
+  return parts.join(' / ');
+}
+
+function formatRuntimePolicySummary(
+  executionPolicy: BackgroundExecutionPolicyStatus | null | undefined
+): string {
+  const blockers = getRuntimePolicyBlockers(executionPolicy);
+  return blockers.length > 0
+    ? ` Policy blockers: ${blockers.join('; ')}.`
+    : '';
+}
+
+function getRuntimeLastPolicyBlockerSummary(
+  status: BackgroundLocationServiceStatus
+): string {
+  const lastPolicyBlockerReason = status.telemetry.lastPolicyBlockerReason;
+  if (!lastPolicyBlockerReason) {
+    return '';
+  }
+
+  const recentPolicyBlocker = getRecentPolicyBlockerInsight(status);
+  if (recentPolicyBlocker && getRuntimePolicyBlockers(status.executionPolicy).length === 0) {
+    return ` Recent recovery blocker: ${recentPolicyBlocker.formattedReason} (${recentPolicyBlocker.ageLabel}), but the current execution policy looks clear now.`;
+  }
+
+  const timestampLabel = formatRuntimeTimestamp(status.telemetry.lastPolicyBlockerAt);
+  return timestampLabel !== 'never'
+    ? ` Last policy blocker: ${formatPolicyBlockerReason(lastPolicyBlockerReason)} (${timestampLabel}).`
+    : ` Last policy blocker: ${formatPolicyBlockerReason(lastPolicyBlockerReason)}.`;
+}
+
+function formatRuntimeEvent(
+  timestamp: number | null | undefined,
+  reason: string | null | undefined,
+  detail?: string | null,
+  emptyLabel = 'none'
+): string {
+  if (
+    (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp <= 0) &&
+    !reason
+  ) {
+    return emptyLabel;
+  }
+
+  const parts: string[] = [];
+  if (reason) {
+    parts.push(formatRuntimeReason(reason, detail));
+  }
+
+  const timestampLabel = formatRuntimeTimestamp(timestamp);
+  if (timestampLabel !== 'never') {
+    parts.push(timestampLabel);
+  }
+
+  return parts.length > 0 ? parts.join(' / ') : emptyLabel;
+}
+
+function formatRecoveryDue(
+  dueAt: number | null | undefined,
+  kind: string | null | undefined
+): string {
+  if (kind === 'retry_pending') {
+    return 'retry pending / WorkManager backoff';
+  }
+
+  const kindLabel = formatRecoveryScheduleKind(kind);
+  if (typeof dueAt !== 'number' || !Number.isFinite(dueAt) || dueAt <= 0) {
+    return kind ? `${kindLabel} / unknown` : 'none';
+  }
+
+  const deltaMs = dueAt - Date.now();
+  const durationLabel = formatRuntimeDuration(Math.abs(deltaMs));
+  return deltaMs >= 0
+    ? `${kindLabel} / in ${durationLabel}`
+    : `${kindLabel} / overdue by ${durationLabel}`;
+}
+
+function getBackgroundRuntimeSummary(
+  autoDetectionEnabled: boolean,
+  status: BackgroundLocationServiceStatus | null
+): string {
+  if (!autoDetectionEnabled) {
+    return 'Auto detection is off, so the native background chain will stay idle.';
+  }
+
+  if (!status) {
+    return 'Unable to read native background runtime state.';
+  }
+
+  const policySummary = formatRuntimePolicySummary(status.executionPolicy);
+  const lastPolicyBlockerSummary = getRuntimeLastPolicyBlockerSummary(status);
+
+  if (status.running) {
+    return status.telemetry.restartCount > 0
+      ? `Native foreground location service is active. Auto-restarted ${status.telemetry.restartCount} time(s).${policySummary}`
+      : `Native foreground location service is active.${policySummary}`;
+  }
+
+  if (status.recoveryEnabled) {
+    const queueLabel = `Queue: immediate ${formatWorkManagerState(
+      status.telemetry.immediateWorkerState,
+      status.telemetry.immediateWorkerRunAttemptCount
+    )}; periodic ${formatWorkManagerState(
+      status.telemetry.periodicWorkerState,
+      status.telemetry.periodicWorkerRunAttemptCount
+    )}.`;
+    if (status.telemetry.lastFailureReason) {
+      const dueLabel = formatRecoveryDue(
+        status.telemetry.nextRecoveryDueAt,
+        status.telemetry.nextRecoveryKind
+      );
+      return `Foreground service is idle, but recovery worker is armed. Next recovery: ${dueLabel}. ${queueLabel}${policySummary} Last failure: ${formatRuntimeReason(status.telemetry.lastFailureReason)}.${lastPolicyBlockerSummary}`;
+    }
+
+    if (status.telemetry.lastWorkerOutcome) {
+      const dueLabel = formatRecoveryDue(
+        status.telemetry.nextRecoveryDueAt,
+        status.telemetry.nextRecoveryKind
+      );
+      return `Foreground service is idle, but recovery worker is armed. Next recovery: ${dueLabel}. ${queueLabel}${policySummary} Last worker run: ${formatRuntimeReason(status.telemetry.lastWorkerOutcome, status.telemetry.lastWorkerDetail)}.${lastPolicyBlockerSummary}`;
+    }
+
+    return `Foreground service is idle, but recovery worker is armed. Next recovery: ${formatRecoveryDue(
+      status.telemetry.nextRecoveryDueAt,
+      status.telemetry.nextRecoveryKind
+    )}. ${queueLabel}${policySummary}${lastPolicyBlockerSummary}`;
+  }
+
+  return `Native chain is idle. Re-enter background or re-check blocked permissions.${policySummary}`;
+}
 
 /**
  * 主设置页面
@@ -190,6 +538,28 @@ export const SettingsScreen: React.FC = () => {
   const [isClearingLearning, setIsClearingLearning] = useState(false);
   const [onlineLearningEnabled, setOnlineLearningEnabled] = useState(true);
   const [learningHalfLifeDays, setLearningHalfLifeDays] = useState(14);
+  const [backgroundRuntimeStatus, setBackgroundRuntimeStatus] = useState<BackgroundLocationServiceStatus | null>(null);
+  const [backgroundRuntimeLoading, setBackgroundRuntimeLoading] = useState(false);
+  const [backgroundRuntimeRepairing, setBackgroundRuntimeRepairing] = useState(false);
+  const [backgroundRuntimeRepairPlan, setBackgroundRuntimeRepairPlan] =
+    useState<BackgroundRuntimeRepairPlan | null>(null);
+
+  const loadBackgroundRuntimeStatus = async () => {
+    setBackgroundRuntimeLoading(true);
+    try {
+      const status = await sceneBridge.getBackgroundLocationServiceStatus();
+      setBackgroundRuntimeStatus(status);
+      setBackgroundRuntimeRepairPlan(
+        await resolveBackgroundRuntimeRepairPlan(settings.autoDetectionEnabled, status)
+      );
+    } catch (error) {
+      console.warn('[SettingsScreen] Failed to load native background runtime status:', error);
+      setBackgroundRuntimeStatus(null);
+      setBackgroundRuntimeRepairPlan(null);
+    } finally {
+      setBackgroundRuntimeLoading(false);
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -198,9 +568,18 @@ export const SettingsScreen: React.FC = () => {
       const learningConfig = personalizationManager.getOnlineLearningConfig();
       setOnlineLearningEnabled(learningConfig.enabled);
       setLearningHalfLifeDays(learningConfig.halfLifeDays);
+      await loadBackgroundRuntimeStatus();
     };
     init();
   }, []);
+
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+
+    loadBackgroundRuntimeStatus();
+  }, [isLoading, settings.autoDetectionEnabled, settings.detectionInterval]);
 
   const handleToggleOnlineLearning = async (enabled: boolean) => {
     setOnlineLearningEnabled(enabled);
@@ -210,6 +589,39 @@ export const SettingsScreen: React.FC = () => {
   const handleHalfLifeChange = async (days: number) => {
     setLearningHalfLifeDays(days);
     await personalizationManager.setLearningHalfLifeDays(days);
+  };
+
+  const rearmBackgroundRecovery = async () => {
+    const desiredIntervalMs = Math.max(
+      backgroundRuntimeStatus?.recoveryIntervalMs ?? settings.detectionInterval * 60 * 1000,
+      60_000
+    );
+
+    await sceneBridge.configureBackgroundLocationRecovery(true, desiredIntervalMs);
+    await loadBackgroundRuntimeStatus();
+  };
+
+  const handleRepairBackgroundRecovery = async () => {
+    setBackgroundRuntimeRepairing(true);
+    try {
+      const repairKind = backgroundRuntimeRepairPlan
+        ? await performBackgroundRuntimeRepair(
+            backgroundRuntimeRepairPlan,
+            rearmBackgroundRecovery
+          )
+        : (await rearmBackgroundRecovery(), 'rearm' as const);
+
+      if (repairKind === 'rearm') {
+        Alert.alert('Recovery re-armed', 'WorkManager recovery has been re-enqueued.');
+      }
+    } catch (error) {
+      Alert.alert(
+        'Recovery repair failed',
+        `Unable to repair background recovery: ${(error as Error).message}`
+      );
+    } finally {
+      setBackgroundRuntimeRepairing(false);
+    }
   };
 
   const handleClearLearningData = async () => {
@@ -269,10 +681,20 @@ export const SettingsScreen: React.FC = () => {
   /**
    * 重置所有设置
    */
-  const handleResetSettings = () => {
-    resetSettings();
-    setShowResetDialog(false);
-    Alert.alert('成功', '设置已重置为默认值');
+  const handleResetSettings = async () => {
+    try {
+      resetSettings();
+      await personalizationManager.resetOnlineLearningConfig();
+
+      const learningConfig = personalizationManager.getOnlineLearningConfig();
+      setOnlineLearningEnabled(learningConfig.enabled);
+      setLearningHalfLifeDays(learningConfig.halfLifeDays);
+
+      setShowResetDialog(false);
+      Alert.alert('成功', '设置已重置为默认值');
+    } catch (error) {
+      Alert.alert('重置失败', `无法重置设置：${(error as Error).message}`);
+    }
   };
 
   /**
@@ -331,6 +753,24 @@ export const SettingsScreen: React.FC = () => {
     { label: '14 天', value: 14, description: '平衡稳定性与适应性' },
     { label: '30 天', value: 30, description: '更稳定，减少短期波动影响' },
   ];
+
+  const backgroundRuntimeSummary = getBackgroundRuntimeSummary(
+    settings.autoDetectionEnabled,
+    backgroundRuntimeStatus
+  );
+  const backgroundLastLocation = backgroundRuntimeStatus?.lastLocation ?? null;
+  const backgroundRuntimeTelemetry: RuntimeTelemetry | null = backgroundRuntimeStatus?.telemetry ?? null;
+  const backgroundRecoveryNeedsRepair = shouldShowBackgroundRuntimeAlert(
+    settings.autoDetectionEnabled,
+    backgroundRuntimeStatus
+  );
+  const backgroundRuntimeAlertTitle =
+    backgroundRuntimeRepairPlan?.title ?? 'Recovery queue is not armed';
+  const backgroundRuntimeAlertBody =
+    backgroundRuntimeRepairPlan?.body
+    ?? 'Background recovery is enabled, but neither the immediate nor periodic WorkManager job is active.';
+  const backgroundRuntimeAlertButtonLabel =
+    backgroundRuntimeRepairPlan?.buttonLabel ?? 'Re-arm recovery';
 
   if (isLoading) {
     return (
@@ -439,7 +879,7 @@ export const SettingsScreen: React.FC = () => {
         />
 
         {settings.sceneNotificationsEnabled && (
-          <>
+          <View>
             <Divider />
             <View style={styles.sectionContent}>
               <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
@@ -451,7 +891,7 @@ export const SettingsScreen: React.FC = () => {
                 onChange={setNotificationStyle}
               />
             </View>
-          </>
+          </View>
         )}
         
         <Divider />
@@ -482,7 +922,7 @@ export const SettingsScreen: React.FC = () => {
         />
 
         {settings.autoDetectionEnabled && (
-          <>
+          <View>
             <Divider />
             <View style={styles.sectionContent}>
               <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
@@ -494,8 +934,261 @@ export const SettingsScreen: React.FC = () => {
                 onChange={setDetectionInterval}
               />
             </View>
-          </>
+          </View>
         )}
+
+        <Divider />
+
+        <View style={styles.sectionContent}>
+          <View style={styles.runtimeHeader}>
+            <View style={styles.runtimeHeaderText}>
+              <Text style={[styles.runtimeTitle, { color: theme.colors.onSurface }]}>
+                Native Background Runtime
+              </Text>
+              <Text style={[styles.runtimeSummary, { color: theme.colors.onSurfaceVariant }]}>
+                {backgroundRuntimeSummary}
+              </Text>
+            </View>
+            <Button
+              mode="text"
+              compact
+              onPress={loadBackgroundRuntimeStatus}
+              loading={backgroundRuntimeLoading}
+              disabled={backgroundRuntimeLoading}
+            >
+              Refresh
+            </Button>
+          </View>
+
+          {backgroundRecoveryNeedsRepair && (
+            <View
+              style={[
+                styles.runtimeAlert,
+                {
+                  backgroundColor: theme.dark ? 'rgba(255, 179, 71, 0.14)' : '#FFF4E5',
+                  borderColor: theme.dark ? 'rgba(255, 179, 71, 0.4)' : '#F5C26B',
+                },
+              ]}
+            >
+              <View style={styles.runtimeAlertText}>
+                <Text style={[styles.runtimeAlertTitle, { color: theme.colors.onSurface }]}>
+                  {backgroundRuntimeAlertTitle}
+                </Text>
+                <Text style={[styles.runtimeAlertBody, { color: theme.colors.onSurfaceVariant }]}>
+                  {backgroundRuntimeAlertBody}
+                </Text>
+              </View>
+              <Button
+                mode="contained-tonal"
+                compact
+                onPress={handleRepairBackgroundRecovery}
+                loading={backgroundRuntimeRepairing}
+                disabled={backgroundRuntimeRepairing || backgroundRuntimeLoading}
+              >
+                {backgroundRuntimeAlertButtonLabel}
+              </Button>
+            </View>
+          )}
+
+          <View
+            style={[
+              styles.runtimePanel,
+              { backgroundColor: theme.colors.surfaceVariant },
+            ]}
+          >
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Foreground service
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {backgroundRuntimeStatus?.running ? 'running' : 'stopped'}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Poll interval
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeInterval(backgroundRuntimeStatus?.intervalMs ?? 0)}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Recovery worker
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {backgroundRuntimeStatus?.recoveryEnabled
+                  ? `enabled / ${formatRuntimeInterval(backgroundRuntimeStatus.recoveryIntervalMs)}`
+                  : 'disabled'}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Execution policy
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeExecutionPolicy(backgroundRuntimeStatus?.executionPolicy)}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Last background fix
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {backgroundLastLocation
+                  ? `${backgroundLastLocation.source ?? backgroundLastLocation.provider ?? 'unknown'} / ${formatRuntimeLocationAge(backgroundLastLocation)}${backgroundLastLocation.isStale ? ' / stale' : ''}`
+                  : 'none'}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Accuracy
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {backgroundLastLocation
+                  ? `${Math.round(backgroundLastLocation.accuracy)}m`
+                  : 'n/a'}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Last start
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeEvent(
+                  backgroundRuntimeTelemetry?.lastStartAt,
+                  backgroundRuntimeTelemetry?.lastStartReason
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Last stop
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeEvent(
+                  backgroundRuntimeTelemetry?.lastStopAt,
+                  backgroundRuntimeTelemetry?.lastStopReason
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Last recovery trigger
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeEvent(
+                  backgroundRuntimeTelemetry?.lastRecoveryAt,
+                  backgroundRuntimeTelemetry?.lastRecoveryReason
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Last recovery schedule
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeEvent(
+                  backgroundRuntimeTelemetry?.lastRecoveryScheduleAt,
+                  backgroundRuntimeTelemetry?.nextRecoveryKind
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Next recovery due
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRecoveryDue(
+                  backgroundRuntimeTelemetry?.nextRecoveryDueAt,
+                  backgroundRuntimeTelemetry?.nextRecoveryKind
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Immediate work
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatWorkManagerState(
+                  backgroundRuntimeTelemetry?.immediateWorkerState,
+                  backgroundRuntimeTelemetry?.immediateWorkerRunAttemptCount
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Periodic work
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatWorkManagerState(
+                  backgroundRuntimeTelemetry?.periodicWorkerState,
+                  backgroundRuntimeTelemetry?.periodicWorkerRunAttemptCount
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Last worker run
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeEvent(
+                  backgroundRuntimeTelemetry?.lastWorkerRunAt,
+                  backgroundRuntimeTelemetry?.lastWorkerOutcome,
+                  backgroundRuntimeTelemetry?.lastWorkerDetail
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Last failure
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeEvent(
+                  backgroundRuntimeTelemetry?.lastFailureAt,
+                  backgroundRuntimeTelemetry?.lastFailureReason
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.runtimeRow}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Last policy blocker
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {formatRuntimeEvent(
+                  backgroundRuntimeTelemetry?.lastPolicyBlockerAt,
+                  backgroundRuntimeTelemetry?.lastPolicyBlockerReason
+                    ? formatPolicyBlockerReason(backgroundRuntimeTelemetry.lastPolicyBlockerReason)
+                    : null
+                )}
+              </Text>
+            </View>
+
+            <View style={[styles.runtimeRow, styles.runtimeRowLast]}>
+              <Text style={[styles.runtimeKey, { color: theme.colors.onSurfaceVariant }]}>
+                Auto restarts
+              </Text>
+              <Text style={[styles.runtimeValue, { color: theme.colors.onSurface }]}>
+                {backgroundRuntimeTelemetry?.restartCount ?? 0}
+              </Text>
+            </View>
+          </View>
+        </View>
 
         <Divider />
 
@@ -519,7 +1212,7 @@ export const SettingsScreen: React.FC = () => {
         />
 
         {onlineLearningEnabled && (
-          <>
+          <View>
             <Divider />
             <View style={styles.sectionContent}>
               <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
@@ -531,7 +1224,7 @@ export const SettingsScreen: React.FC = () => {
                 onChange={handleHalfLifeChange}
               />
             </View>
-          </>
+          </View>
         )}
       </Card>
 
@@ -801,6 +1494,66 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#333',
+  },
+  runtimeHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  runtimeHeaderText: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  runtimeTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  runtimeSummary: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  runtimeAlert: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 12,
+  },
+  runtimeAlertText: {
+    marginBottom: 10,
+  },
+  runtimeAlertTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  runtimeAlertBody: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  runtimePanel: {
+    borderRadius: 12,
+    padding: 12,
+  },
+  runtimeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  runtimeRowLast: {
+    marginBottom: 0,
+  },
+  runtimeKey: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+    paddingRight: 12,
+  },
+  runtimeValue: {
+    flex: 1,
+    fontSize: 13,
+    textAlign: 'right',
   },
   dangerItem: {
     backgroundColor: '#FFF5F5',

@@ -62,4 +62,23 @@ describe('PersonalizationManager online learning', () => {
     const afterClearBoost = (manager as any).getActionLearningBoost('STUDY', 'focus') as number;
     expect(afterClearBoost).toBe(0);
   });
+
+  it('resets online learning config back to defaults without clearing learning history', async () => {
+    const manager = new PersonalizationManager();
+    await manager.initialize();
+    await manager.setOnlineLearningEnabled(true);
+    await manager.recordActionOutcome('COMMUTE', 'route-home', true);
+    await manager.setOnlineLearningEnabled(false);
+    await manager.setLearningHalfLifeDays(30);
+
+    await manager.resetOnlineLearningConfig();
+
+    expect(manager.getOnlineLearningConfig()).toEqual({
+      enabled: true,
+      halfLifeDays: 14,
+    });
+
+    const restoredBoost = (manager as any).getActionLearningBoost('COMMUTE', 'route-home') as number;
+    expect(restoredBoost).toBeGreaterThan(0);
+  });
 });

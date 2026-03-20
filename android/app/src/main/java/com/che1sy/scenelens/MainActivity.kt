@@ -27,6 +27,7 @@ class MainActivity : ReactActivity() {
 
   override fun onNewIntent(intent: Intent?) {
     super.onNewIntent(intent)
+    setIntent(intent)
     // Handle shortcut intent when app is already running
     handleShortcutIntent(intent)
   }

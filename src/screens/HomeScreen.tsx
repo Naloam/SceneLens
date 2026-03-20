@@ -24,12 +24,24 @@ import { sceneSuggestionManager } from '../services/SceneSuggestionManager';
 import { predictiveTrigger } from '../core/PredictiveTrigger';
 import { feedbackProcessor } from '../learning/FeedbackProcessor';
 import { spacing } from '../theme/spacing';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   mapOneTapActionKindToProcessorFeedback,
   mapOneTapActionKindToUserFeedback,
 } from '../utils/suggestionFeedback';
 import SceneSuggestionCard from '../components/ui/SceneSuggestionCard';
 import { QuickActionsPanel } from '../components/quickactions/QuickActionsPanel';
+import sceneBridge, { type BackgroundLocationServiceStatus } from '../core/SceneBridge';
+import { useSettingsStore } from '../stores/settingsStore';
+import {
+  formatWorkManagerState,
+  formatPolicyBlockerReason,
+  getRecentPolicyBlockerInsight,
+  performBackgroundRuntimeRepair,
+  resolveBackgroundRuntimeRepairPlan,
+  shouldShowBackgroundRuntimeAlert,
+  type BackgroundRuntimeRepairPlan,
+} from './homeRuntimeAlert';
 
 // Hooks
 import {
@@ -73,6 +85,7 @@ export const HomeScreen: React.FC = () => {
       isManualMode: state.isManualMode,
     }))
   );
+  const settings = useSettingsStore(state => state.settings);
 
   // 场景检测
   const {
@@ -113,6 +126,12 @@ export const HomeScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [detailDialogVisible, setDetailDialogVisible] = useState(false);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<SceneHistory | null>(null);
+  const [backgroundRuntimeStatus, setBackgroundRuntimeStatus] =
+    useState<BackgroundLocationServiceStatus | null>(null);
+  const [backgroundRuntimeLoading, setBackgroundRuntimeLoading] = useState(false);
+  const [backgroundRuntimeRepairing, setBackgroundRuntimeRepairing] = useState(false);
+  const [backgroundRuntimeRepairPlan, setBackgroundRuntimeRepairPlan] =
+    useState<BackgroundRuntimeRepairPlan | null>(null);
 
   // 建议弹窗状态
   const [suggestionDialogVisible, setSuggestionDialogVisible] = useState(false);
@@ -127,9 +146,27 @@ export const HomeScreen: React.FC = () => {
     initialize();
   }, []);
 
+  const loadBackgroundRuntimeStatus = useCallback(async () => {
+    setBackgroundRuntimeLoading(true);
+    try {
+      const status = await sceneBridge.getBackgroundLocationServiceStatus();
+      setBackgroundRuntimeStatus(status);
+      setBackgroundRuntimeRepairPlan(
+        await resolveBackgroundRuntimeRepairPlan(settings.autoDetectionEnabled, status)
+      );
+    } catch (error) {
+      console.warn('[HomeScreen] Failed to load background runtime status:', error);
+      setBackgroundRuntimeStatus(null);
+      setBackgroundRuntimeRepairPlan(null);
+    } finally {
+      setBackgroundRuntimeLoading(false);
+    }
+  }, [settings.autoDetectionEnabled]);
+
   const initialize = async () => {
     await getCurrentLocation();
     await detectScene();
+    await loadBackgroundRuntimeStatus();
   };
 
   /**
@@ -146,12 +183,25 @@ export const HomeScreen: React.FC = () => {
     }
   }, [currentContext, loadSceneSuggestion]);
 
+  useFocusEffect(
+    useCallback(() => {
+      void loadBackgroundRuntimeStatus();
+    }, [loadBackgroundRuntimeStatus])
+  );
+
+  useEffect(() => {
+    void loadBackgroundRuntimeStatus();
+  }, [loadBackgroundRuntimeStatus, settings.autoDetectionEnabled, settings.detectionInterval]);
+
   // ============ 事件处理 ============
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await detectScene();
+    await Promise.all([
+      detectScene(),
+      loadBackgroundRuntimeStatus(),
+    ]);
     setRefreshing(false);
-  }, [detectScene]);
+  }, [detectScene, loadBackgroundRuntimeStatus]);
 
   const showHistoryDetail = useCallback((item: SceneHistory) => {
     setSelectedHistoryItem(item);
@@ -334,7 +384,77 @@ export const HomeScreen: React.FC = () => {
     setSceneSelectorVisible(false);
   }, [setManualScene, addToHistory]);
 
+  const rearmBackgroundRecovery = useCallback(async () => {
+    const desiredIntervalMs = Math.max(
+      backgroundRuntimeStatus?.recoveryIntervalMs ?? settings.detectionInterval * 60 * 1000,
+      60_000
+    );
+
+    await sceneBridge.configureBackgroundLocationRecovery(true, desiredIntervalMs);
+    await loadBackgroundRuntimeStatus();
+  }, [
+    backgroundRuntimeStatus?.recoveryIntervalMs,
+    loadBackgroundRuntimeStatus,
+    settings.detectionInterval,
+  ]);
+
+  const handleRepairBackgroundRecovery = useCallback(async () => {
+    setBackgroundRuntimeRepairing(true);
+    try {
+      const repairKind = backgroundRuntimeRepairPlan
+        ? await performBackgroundRuntimeRepair(
+            backgroundRuntimeRepairPlan,
+            rearmBackgroundRecovery
+          )
+        : (await rearmBackgroundRecovery(), 'rearm' as const);
+
+      if (repairKind === 'rearm') {
+        Alert.alert('Recovery re-armed', 'WorkManager recovery has been re-enqueued.');
+      }
+    } catch (error) {
+      Alert.alert(
+        'Recovery repair failed',
+        `Unable to repair background recovery: ${(error as Error).message}`
+      );
+    } finally {
+      setBackgroundRuntimeRepairing(false);
+    }
+  }, [backgroundRuntimeRepairPlan, rearmBackgroundRecovery]);
+
   const recentHistory = getRecentHistory(5);
+  const showBackgroundRuntimeAlert = shouldShowBackgroundRuntimeAlert(
+    settings.autoDetectionEnabled,
+    backgroundRuntimeStatus
+  );
+  const recentPolicyBlocker = getRecentPolicyBlockerInsight(backgroundRuntimeStatus);
+  const backgroundRuntimeAlertMessage = backgroundRuntimeStatus
+    ? [
+        `Immediate work: ${formatWorkManagerState(
+          backgroundRuntimeStatus.telemetry.immediateWorkerState,
+          backgroundRuntimeStatus.telemetry.immediateWorkerRunAttemptCount
+        )}.`,
+        `Periodic work: ${formatWorkManagerState(
+          backgroundRuntimeStatus.telemetry.periodicWorkerState,
+          backgroundRuntimeStatus.telemetry.periodicWorkerRunAttemptCount
+        )}.`,
+        recentPolicyBlocker
+          ? `Recent policy blocker: ${recentPolicyBlocker.formattedReason} (${recentPolicyBlocker.ageLabel}).`
+          : backgroundRuntimeStatus.telemetry.lastPolicyBlockerReason
+            ? `Last policy blocker: ${formatPolicyBlockerReason(
+                backgroundRuntimeStatus.telemetry.lastPolicyBlockerReason
+              )}.`
+            : null,
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : 'Background runtime status is unavailable.';
+  const backgroundRuntimeAlertTitle =
+    backgroundRuntimeRepairPlan?.title ?? 'Recovery queue is not armed';
+  const backgroundRuntimeAlertBody =
+    backgroundRuntimeRepairPlan?.body
+    ?? 'Background recovery is enabled, but the native WorkManager queue is no longer armed.';
+  const backgroundRuntimeAlertButtonLabel =
+    backgroundRuntimeRepairPlan?.buttonLabel ?? 'Re-arm recovery';
 
   // ============ 渲染 ============
   return (
@@ -365,6 +485,29 @@ export const HomeScreen: React.FC = () => {
           诊断
         </Button>
       </View>
+
+      {showBackgroundRuntimeAlert && (
+        <View style={styles.runtimeAlertCard}>
+          <Text variant="titleMedium" style={styles.runtimeAlertTitle}>
+            {backgroundRuntimeAlertTitle}
+          </Text>
+          <Text variant="bodyMedium" style={styles.runtimeAlertBody}>
+            {backgroundRuntimeAlertBody}
+          </Text>
+          <Text variant="bodySmall" style={styles.runtimeAlertMeta}>
+            {backgroundRuntimeAlertMessage}
+          </Text>
+          <Button
+            mode="contained-tonal"
+            onPress={handleRepairBackgroundRecovery}
+            loading={backgroundRuntimeRepairing}
+            disabled={backgroundRuntimeRepairing || backgroundRuntimeLoading}
+            style={styles.runtimeAlertButton}
+          >
+            {backgroundRuntimeAlertButtonLabel}
+          </Button>
+        </View>
+      )}
 
       {/* 当前位置卡片 */}
       <LocationCard
@@ -532,6 +675,29 @@ const styles = StyleSheet.create({
   },
   diagnoseButton: {
     marginTop: spacing.md,
+  },
+  runtimeAlertCard: {
+    borderRadius: 16,
+    backgroundColor: '#FFF4E5',
+    borderWidth: 1,
+    borderColor: '#F5C26B',
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  runtimeAlertTitle: {
+    fontWeight: '700',
+    marginBottom: spacing.xs,
+  },
+  runtimeAlertBody: {
+    color: '#5C3A00',
+  },
+  runtimeAlertMeta: {
+    marginTop: spacing.sm,
+    color: '#7D5700',
+  },
+  runtimeAlertButton: {
+    marginTop: spacing.md,
+    alignSelf: 'flex-start',
   },
 });
 

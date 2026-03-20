@@ -32,6 +32,8 @@ export enum PermissionType {
   LOCATION_COARSE = 'location_coarse',
   /** 后台位置 */
   LOCATION_BACKGROUND = 'location_background',
+  /** 电池优化豁免 */
+  BATTERY_OPTIMIZATION = 'battery_optimization',
   /** 日历读取 */
   CALENDAR_READ = 'calendar_read',
   /** 日历写入 */
@@ -128,6 +130,8 @@ const ANDROID_PERMISSION_RESULTS = PermissionsAndroid?.RESULTS ?? {
   NEVER_ASK_AGAIN: 'never_ask_again',
 };
 
+const ANDROID_10_API_LEVEL = 29;
+const ANDROID_11_API_LEVEL = 30;
 const ANDROID_13_API_LEVEL = 33;
 
 export function getAndroidApiLevel(
@@ -154,6 +158,13 @@ export function requiresNotificationRuntimePermission(
   return apiLevel === null || apiLevel >= ANDROID_13_API_LEVEL;
 }
 
+export function requiresBackgroundLocationSettingsNavigation(
+  platformLike: { Version?: unknown } = Platform
+): boolean {
+  const apiLevel = getAndroidApiLevel(platformLike);
+  return apiLevel === null || apiLevel >= ANDROID_11_API_LEVEL;
+}
+
 /**
  * 权限到 Android 权限字符串的映射
  */
@@ -161,6 +172,7 @@ const PERMISSION_ANDROID_MAP: Record<PermissionType, string | null> = {
   [PermissionType.LOCATION_FINE]: ANDROID_PERMISSIONS.ACCESS_FINE_LOCATION,
   [PermissionType.LOCATION_COARSE]: ANDROID_PERMISSIONS.ACCESS_COARSE_LOCATION,
   [PermissionType.LOCATION_BACKGROUND]: 'android.permission.ACCESS_BACKGROUND_LOCATION',
+  [PermissionType.BATTERY_OPTIMIZATION]: null, // 特殊权限，需要跳转设置
   [PermissionType.CALENDAR_READ]: ANDROID_PERMISSIONS.READ_CALENDAR,
   [PermissionType.CALENDAR_WRITE]: ANDROID_PERMISSIONS.WRITE_CALENDAR,
   [PermissionType.ACTIVITY_RECOGNITION]: 'android.permission.ACTIVITY_RECOGNITION',
@@ -178,6 +190,7 @@ const PERMISSION_ANDROID_MAP: Record<PermissionType, string | null> = {
  * 特殊权限列表（需要跳转到系统设置）
  */
 const SPECIAL_PERMISSIONS: PermissionType[] = [
+  PermissionType.BATTERY_OPTIMIZATION,
   PermissionType.WRITE_SETTINGS,
   PermissionType.NOTIFICATION_POLICY,
   PermissionType.USAGE_STATS,
@@ -194,6 +207,14 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     icon: 'map-marker',
     permissions: [PermissionType.LOCATION_FINE, PermissionType.LOCATION_COARSE],
     required: true,
+  },
+  {
+    id: 'background_execution',
+    name: '后台执行',
+    description: '用于降低省电策略对后台场景检测和前台服务恢复的影响',
+    icon: 'battery-heart',
+    permissions: [PermissionType.LOCATION_BACKGROUND, PermissionType.BATTERY_OPTIMIZATION],
+    required: false,
   },
   {
     id: 'calendar',
@@ -250,6 +271,9 @@ const PERMISSION_TO_ANDROID_STRING: Partial<Record<PermissionType, string>> = {
   [PermissionType.CALENDAR_READ]: 'android.permission.READ_CALENDAR',
   [PermissionType.CALENDAR_WRITE]: 'android.permission.WRITE_CALENDAR',
   [PermissionType.ACTIVITY_RECOGNITION]: 'android.permission.ACTIVITY_RECOGNITION',
+  [PermissionType.WRITE_SETTINGS]: 'android.permission.WRITE_SETTINGS',
+  [PermissionType.NOTIFICATION_POLICY]: 'android.permission.ACCESS_NOTIFICATION_POLICY',
+  [PermissionType.USAGE_STATS]: 'android.permission.PACKAGE_USAGE_STATS',
   [PermissionType.NOTIFICATIONS]: 'android.permission.POST_NOTIFICATIONS',
   [PermissionType.MICROPHONE]: 'android.permission.RECORD_AUDIO',
   [PermissionType.CAMERA]: 'android.permission.CAMERA',
@@ -260,9 +284,18 @@ const PERMISSION_TO_ANDROID_STRING: Partial<Record<PermissionType, string>> = {
 async function openOppoPermissionSettingsWithFallback(
   blockedPermissions: PermissionType[]
 ): Promise<void> {
-  const androidPermissions = blockedPermissions
-    .map(permission => PERMISSION_TO_ANDROID_STRING[permission])
-    .filter((value): value is string => !!value);
+  const androidPermissions = Array.from(
+    new Set(
+      blockedPermissions
+        .map(permission => PERMISSION_TO_ANDROID_STRING[permission])
+        .filter((value): value is string => !!value)
+    )
+  );
+
+  if (androidPermissions.length === 0) {
+    await Linking.openSettings();
+    return;
+  }
 
   if (
     getOppoPermissionModule() &&
@@ -342,6 +375,85 @@ export class PermissionManager {
   /**
    * 检查单个权限状态
    */
+  private async clearPersistedPermanentDenial(permission: PermissionType): Promise<void> {
+    if (!this.permanentlyDenied.delete(permission)) {
+      return;
+    }
+
+    await this.saveState();
+  }
+
+  private async checkAndroidRuntimePermission(permission: PermissionType): Promise<boolean | null> {
+    const androidPermission = PERMISSION_ANDROID_MAP[permission];
+    if (!androidPermission || typeof PermissionsAndroid?.check !== 'function') {
+      return null;
+    }
+
+    return PermissionsAndroid.check(androidPermission as any);
+  }
+
+  private async hasForegroundLocationGrant(): Promise<boolean> {
+    const [fineGranted, coarseGranted] = await Promise.all([
+      this.checkAndroidRuntimePermission(PermissionType.LOCATION_FINE),
+      this.checkAndroidRuntimePermission(PermissionType.LOCATION_COARSE),
+    ]);
+
+    return Boolean(fineGranted || coarseGranted);
+  }
+
+  private async checkBackgroundLocationPermission(): Promise<PermissionCheckResult> {
+    const apiLevel = getAndroidApiLevel();
+
+    if (apiLevel !== null && apiLevel < ANDROID_10_API_LEVEL) {
+      const granted = await this.hasForegroundLocationGrant();
+      return {
+        permission: PermissionType.LOCATION_BACKGROUND,
+        status: granted ? PermissionStatus.GRANTED : PermissionStatus.DENIED,
+        canRequest: !granted,
+      };
+    }
+
+    const granted = await this.checkAndroidRuntimePermission(PermissionType.LOCATION_BACKGROUND);
+    if (granted === null) {
+      return {
+        permission: PermissionType.LOCATION_BACKGROUND,
+        status: PermissionStatus.UNAVAILABLE,
+        canRequest: false,
+      };
+    }
+
+    if (granted) {
+      await this.clearPersistedPermanentDenial(PermissionType.LOCATION_BACKGROUND);
+      return {
+        permission: PermissionType.LOCATION_BACKGROUND,
+        status: PermissionStatus.GRANTED,
+        canRequest: false,
+      };
+    }
+
+    if (requiresBackgroundLocationSettingsNavigation()) {
+      return {
+        permission: PermissionType.LOCATION_BACKGROUND,
+        status: PermissionStatus.REQUIRES_SETTINGS,
+        canRequest: true,
+      };
+    }
+
+    if (this.permanentlyDenied.has(PermissionType.LOCATION_BACKGROUND)) {
+      return {
+        permission: PermissionType.LOCATION_BACKGROUND,
+        status: PermissionStatus.PERMANENTLY_DENIED,
+        canRequest: false,
+      };
+    }
+
+    return {
+      permission: PermissionType.LOCATION_BACKGROUND,
+      status: PermissionStatus.DENIED,
+      canRequest: true,
+    };
+  }
+
   async checkPermission(permission: PermissionType): Promise<PermissionCheckResult> {
     if (Platform?.OS && Platform.OS !== 'android') {
       return {
@@ -369,8 +481,13 @@ export class PermissionManager {
       return this.checkSpecialPermission(permission);
     }
 
+    if (permission === PermissionType.LOCATION_BACKGROUND) {
+      return this.checkBackgroundLocationPermission();
+    }
+
     // 检查是否已永久拒绝
-    if (this.permanentlyDenied.has(permission)) {
+    const isPermanentlyDenied = this.permanentlyDenied.has(permission);
+    if (false && isPermanentlyDenied) {
       return {
         permission,
         status: PermissionStatus.PERMANENTLY_DENIED,
@@ -379,8 +496,8 @@ export class PermissionManager {
     }
 
     // 检查普通权限
-    const androidPermission = PERMISSION_ANDROID_MAP[permission];
-    if (!androidPermission) {
+    const granted = await this.checkAndroidRuntimePermission(permission);
+    if (granted === null) {
       return {
         permission,
         status: PermissionStatus.UNAVAILABLE,
@@ -388,20 +505,28 @@ export class PermissionManager {
       };
     }
 
-    if (typeof PermissionsAndroid?.check !== 'function') {
+    if (granted) {
+      await this.clearPersistedPermanentDenial(permission);
       return {
         permission,
-        status: PermissionStatus.UNAVAILABLE,
+        status: PermissionStatus.GRANTED,
+        canRequest: false,
+      };
+    }
+
+    if (isPermanentlyDenied) {
+      return {
+        permission,
+        status: PermissionStatus.PERMANENTLY_DENIED,
         canRequest: false,
       };
     }
 
     try {
-      const granted = await PermissionsAndroid.check(androidPermission as any);
       return {
         permission,
-        status: granted ? PermissionStatus.GRANTED : PermissionStatus.DENIED,
-        canRequest: !granted,
+        status: PermissionStatus.DENIED,
+        canRequest: true,
       };
     } catch (error) {
       console.error(`[PermissionManager] 检查权限失败 ${permission}:`, error);
@@ -421,6 +546,10 @@ export class PermissionManager {
       let granted = false;
 
       switch (permission) {
+        case PermissionType.BATTERY_OPTIMIZATION:
+          granted = await sceneBridge.isIgnoringBatteryOptimizations();
+          break;
+
         case PermissionType.WRITE_SETTINGS:
           granted = await checkWriteSettingsPermission();
           break;
@@ -471,6 +600,20 @@ export class PermissionManager {
       return this.requestSpecialPermission(permission);
     }
 
+    const currentStatus = await this.checkPermission(permission);
+    if (currentStatus.status === PermissionStatus.GRANTED) {
+      return PermissionStatus.GRANTED;
+    }
+
+    if (currentStatus.status === PermissionStatus.PERMANENTLY_DENIED) {
+      return PermissionStatus.PERMANENTLY_DENIED;
+    }
+
+    if (currentStatus.status === PermissionStatus.REQUIRES_SETTINGS) {
+      await this.openSpecificSettings(permission);
+      return PermissionStatus.REQUIRES_SETTINGS;
+    }
+
     // 检查是否已永久拒绝
     if (this.permanentlyDenied.has(permission)) {
       return PermissionStatus.PERMANENTLY_DENIED;
@@ -510,7 +653,7 @@ export class PermissionManager {
       } else {
         status = PermissionStatus.DENIED;
         // 如果多次拒绝，可能需要引导到设置
-        if (currentCount >= 2) {
+        if (false && currentCount >= 2) {
           this.permanentlyDenied.add(permission);
           status = PermissionStatus.PERMANENTLY_DENIED;
         }
@@ -530,26 +673,34 @@ export class PermissionManager {
   private async requestSpecialPermission(permission: PermissionType): Promise<PermissionStatus> {
     try {
       switch (permission) {
+        case PermissionType.BATTERY_OPTIMIZATION:
+          if (!(await sceneBridge.requestIgnoreBatteryOptimizations())) {
+            if (!(await sceneBridge.openBatteryOptimizationSettings())) {
+              await this.openAppSettings([permission]);
+            }
+          }
+          break;
+
         case PermissionType.WRITE_SETTINGS:
           if (!(await openWriteSettingsSettings())) {
-            await Linking.openSettings();
+            await this.openAppSettings([permission]);
           }
           break;
 
         case PermissionType.NOTIFICATION_POLICY:
           if (!(await openDoNotDisturbSettings())) {
-            await Linking.openSettings();
+            await this.openAppSettings([permission]);
           }
           break;
 
         case PermissionType.USAGE_STATS:
           if (!(await sceneBridge.openUsageStatsSettings())) {
-            await Linking.openSettings();
+            await this.openAppSettings([permission]);
           }
           break;
 
         default:
-          await Linking.openSettings();
+          await this.openAppSettings([permission]);
       }
 
       // 返回需要设置状态，用户需要手动操作
@@ -674,8 +825,13 @@ export class PermissionManager {
   /**
    * 打开应用设置页面
    */
-  async openAppSettings(): Promise<void> {
+  async openAppSettings(blockedPermissions: PermissionType[] = []): Promise<void> {
     try {
+      if (blockedPermissions.length > 0) {
+        await openOppoPermissionSettingsWithFallback(blockedPermissions);
+        return;
+      }
+
       await Linking.openSettings();
     } catch (error) {
       console.error('[PermissionManager] 打开应用设置失败:', error);
@@ -691,32 +847,45 @@ export class PermissionManager {
    */
   async openSpecificSettings(permission: PermissionType): Promise<void> {
     switch (permission) {
+      case PermissionType.BATTERY_OPTIMIZATION:
+        if (!(await sceneBridge.openBatteryOptimizationSettings())) {
+          await this.openAppSettings([permission]);
+        }
+        break;
+
       case PermissionType.WRITE_SETTINGS:
         if (!(await openWriteSettingsSettings())) {
-          await this.openAppSettings();
+          await this.openAppSettings([permission]);
         }
         break;
 
       case PermissionType.NOTIFICATION_POLICY:
         if (!(await openDoNotDisturbSettings())) {
-          await this.openAppSettings();
+          await this.openAppSettings([permission]);
         }
         break;
 
       case PermissionType.USAGE_STATS:
         if (!(await sceneBridge.openUsageStatsSettings())) {
-          await this.openAppSettings();
+          await this.openAppSettings([permission]);
         }
+        break;
+
+      case PermissionType.LOCATION_BACKGROUND:
+        await this.openAppSettings([
+          PermissionType.LOCATION_FINE,
+          PermissionType.LOCATION_BACKGROUND,
+        ]);
         break;
 
       case PermissionType.NOTIFICATIONS:
         if (!(await openNotificationSettings())) {
-          await openOppoPermissionSettingsWithFallback([permission]);
+          await this.openAppSettings([permission]);
         }
         break;
 
       default:
-        await openOppoPermissionSettingsWithFallback([permission]);
+        await this.openAppSettings([permission]);
     }
   }
 
@@ -785,6 +954,7 @@ export class PermissionManager {
       [PermissionType.LOCATION_FINE]: '精确位置',
       [PermissionType.LOCATION_COARSE]: '大致位置',
       [PermissionType.LOCATION_BACKGROUND]: '后台位置',
+      [PermissionType.BATTERY_OPTIMIZATION]: '省电策略豁免',
       [PermissionType.CALENDAR_READ]: '日历读取',
       [PermissionType.CALENDAR_WRITE]: '日历写入',
       [PermissionType.ACTIVITY_RECOGNITION]: '活动识别',
@@ -808,6 +978,7 @@ export class PermissionManager {
       [PermissionType.LOCATION_FINE]: 'SceneLens 需要访问您的精确位置，以便在您到家、到公司等场景时自动执行相应操作。',
       [PermissionType.LOCATION_COARSE]: 'SceneLens 需要访问您的大致位置，以便识别您所处的区域。',
       [PermissionType.LOCATION_BACKGROUND]: 'SceneLens 需要在后台访问位置，以便在您移动时持续检测场景变化。',
+      [PermissionType.BATTERY_OPTIMIZATION]: 'SceneLens 需要您将应用加入省电策略白名单，以降低系统过早限制前台服务和后台场景检测的概率。',
       [PermissionType.CALENDAR_READ]: 'SceneLens 需要读取您的日历，以便在会议开始前自动调整手机设置。',
       [PermissionType.CALENDAR_WRITE]: 'SceneLens 需要写入日历权限，以便创建自动化提醒。',
       [PermissionType.ACTIVITY_RECOGNITION]: 'SceneLens 需要识别您的活动状态（如步行、骑行、驾驶），以提供相应的智能建议。',

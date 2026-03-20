@@ -382,6 +382,13 @@ export class PersonalizationManager {
     await this.setPreferences({ learningHalfLifeDays: clampedDays });
   }
 
+  async resetOnlineLearningConfig(): Promise<void> {
+    await this.setPreferences({
+      onlineLearningEnabled: true,
+      learningHalfLifeDays: this.DEFAULT_HALF_LIFE_DAYS,
+    });
+  }
+
   getOnlineLearningConfig(): { enabled: boolean; halfLifeDays: number } {
     return {
       enabled: this.preferences.onlineLearningEnabled !== false,

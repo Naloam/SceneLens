@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -35,10 +35,9 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
-  // 获取设置状态
-  const { settings, loadSettings } = useSettingsStore();
+  const { settings, isLoading, loadSettings } = useSettingsStore();
+  const [backgroundServiceReady, setBackgroundServiceReady] = useState(false);
 
-  // 根据设置动态创建主题
   const theme = useMemo(() => {
     const baseTheme = settings.darkMode ? MD3DarkTheme : MD3LightTheme;
     const colorScheme = themeColors[settings.themeColor];
@@ -64,30 +63,55 @@ export default function App() {
     };
   }, [settings.darkMode, settings.themeColor]);
 
-  // 初始化加载设置
   useEffect(() => {
     loadSettings();
   }, []);
 
-  // 初始化后台服务
   useEffect(() => {
+    let isMounted = true;
+
     const initBackgroundService = async () => {
       try {
         await backgroundService.initialize();
-        backgroundService.start();
-        console.log('[App] Background service started');
+        if (isMounted) {
+          setBackgroundServiceReady(true);
+        }
+        console.log('[App] Background service initialized');
       } catch (error) {
         console.error('[App] Failed to initialize background service:', error);
       }
     };
 
-    initBackgroundService();
+    void initBackgroundService();
 
     // 清理
     return () => {
+      isMounted = false;
       backgroundService.destroy();
     };
   }, []);
+
+  useEffect(() => {
+    if (!backgroundServiceReady || isLoading) {
+      return;
+    }
+
+    backgroundService.updateConfig({
+      detectionIntervalMs: settings.detectionInterval * 60 * 1000,
+      minDetectionIntervalMs: Math.max(settings.detectionInterval, 15) * 60 * 1000,
+    });
+
+    if (settings.autoDetectionEnabled) {
+      backgroundService.start();
+    } else {
+      backgroundService.stop();
+    }
+  }, [
+    backgroundServiceReady,
+    isLoading,
+    settings.autoDetectionEnabled,
+    settings.detectionInterval,
+  ]);
 
   return (
     <PaperProvider theme={theme}>

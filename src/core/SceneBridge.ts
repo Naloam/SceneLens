@@ -14,6 +14,51 @@ import type {
   AudioData,
 } from '../types';
 
+export interface PendingLocationImport {
+  rawText: string;
+  source: string;
+}
+
+export interface BackgroundLocationServiceStatus {
+  running: boolean;
+  intervalMs: number;
+  recoveryEnabled: boolean;
+  recoveryIntervalMs: number;
+  executionPolicy?: BackgroundExecutionPolicyStatus | null;
+  lastLocation: Location | null;
+  telemetry: BackgroundLocationServiceTelemetry;
+}
+
+export interface BackgroundLocationServiceTelemetry {
+  lastStartReason: string | null;
+  lastStartAt: number | null;
+  lastStopReason: string | null;
+  lastStopAt: number | null;
+  lastRecoveryReason: string | null;
+  lastRecoveryAt: number | null;
+  lastRecoveryScheduleAt: number | null;
+  nextRecoveryDueAt: number | null;
+  nextRecoveryKind: string | null;
+  immediateWorkerState: string | null;
+  immediateWorkerRunAttemptCount: number;
+  periodicWorkerState: string | null;
+  periodicWorkerRunAttemptCount: number;
+  lastWorkerRunAt: number | null;
+  lastWorkerOutcome: string | null;
+  lastWorkerDetail: string | null;
+  lastFailureReason: string | null;
+  lastFailureAt: number | null;
+  lastPolicyBlockerReason: string | null;
+  lastPolicyBlockerAt: number | null;
+  restartCount: number;
+}
+
+export interface BackgroundExecutionPolicyStatus {
+  batteryOptimizationIgnored: boolean;
+  backgroundRestricted: boolean;
+  powerSaveModeEnabled: boolean;
+}
+
 interface SceneBridgeNativeModule {
   // 测试方法
   ping(): Promise<{ message: string; timestamp: number }>;
@@ -21,6 +66,11 @@ interface SceneBridgeNativeModule {
   // 位置与网络
   getCurrentLocation(): Promise<Location>;
   getConnectedWiFi(): Promise<WiFiInfo | null>;
+  consumePendingLocationImport(): Promise<PendingLocationImport | null>;
+  configureBackgroundLocationRecovery(enabled: boolean, intervalMs: number): Promise<boolean>;
+  startBackgroundLocationService(intervalMs: number): Promise<BackgroundLocationServiceStatus>;
+  stopBackgroundLocationService(): Promise<boolean>;
+  getBackgroundLocationServiceStatus(): Promise<BackgroundLocationServiceStatus>;
 
   // 传感器
   getMotionState(): Promise<MotionState>;
@@ -37,6 +87,12 @@ interface SceneBridgeNativeModule {
   setBrightness(level: number): Promise<{ level: number; brightness: number }>;
   checkWriteSettingsPermission(): Promise<boolean>;
   openWriteSettingsSettings(): Promise<boolean>;
+  isIgnoringBatteryOptimizations(): Promise<boolean>;
+  openBatteryOptimizationSettings(): Promise<boolean>;
+  requestIgnoreBatteryOptimizations(): Promise<boolean>;
+  isBackgroundRestricted(): Promise<boolean>;
+  isPowerSaveModeEnabled(): Promise<boolean>;
+  openBatterySaverSettings(): Promise<boolean>;
 
   // Deep Link
   openAppWithDeepLink(packageName: string, deepLink?: string): Promise<boolean>;
@@ -113,6 +169,75 @@ const fallback: SceneBridgeNativeModule = {
   async ping() { return { message: 'fallback', timestamp: Date.now() }; },
   async getCurrentLocation() { return { latitude: 0, longitude: 0, accuracy: 100, timestamp: Date.now() }; },
   async getConnectedWiFi() { return null; },
+  async consumePendingLocationImport() { return null; },
+  async configureBackgroundLocationRecovery() { return false; },
+  async startBackgroundLocationService(intervalMs: number) {
+    return {
+      running: false,
+      intervalMs,
+      recoveryEnabled: false,
+      recoveryIntervalMs: intervalMs,
+      executionPolicy: null,
+      lastLocation: null,
+      telemetry: {
+        lastStartReason: null,
+        lastStartAt: null,
+        lastStopReason: null,
+        lastStopAt: null,
+        lastRecoveryReason: null,
+        lastRecoveryAt: null,
+        lastRecoveryScheduleAt: null,
+        nextRecoveryDueAt: null,
+        nextRecoveryKind: null,
+        immediateWorkerState: null,
+        immediateWorkerRunAttemptCount: 0,
+        periodicWorkerState: null,
+        periodicWorkerRunAttemptCount: 0,
+        lastWorkerRunAt: null,
+        lastWorkerOutcome: null,
+        lastWorkerDetail: null,
+        lastFailureReason: null,
+        lastFailureAt: null,
+        lastPolicyBlockerReason: null,
+        lastPolicyBlockerAt: null,
+        restartCount: 0,
+      },
+    };
+  },
+  async stopBackgroundLocationService() { return false; },
+  async getBackgroundLocationServiceStatus() {
+    return {
+      running: false,
+      intervalMs: 0,
+      recoveryEnabled: false,
+      recoveryIntervalMs: 0,
+      executionPolicy: null,
+      lastLocation: null,
+      telemetry: {
+        lastStartReason: null,
+        lastStartAt: null,
+        lastStopReason: null,
+        lastStopAt: null,
+        lastRecoveryReason: null,
+        lastRecoveryAt: null,
+        lastRecoveryScheduleAt: null,
+        nextRecoveryDueAt: null,
+        nextRecoveryKind: null,
+        immediateWorkerState: null,
+        immediateWorkerRunAttemptCount: 0,
+        periodicWorkerState: null,
+        periodicWorkerRunAttemptCount: 0,
+        lastWorkerRunAt: null,
+        lastWorkerOutcome: null,
+        lastWorkerDetail: null,
+        lastFailureReason: null,
+        lastFailureAt: null,
+        lastPolicyBlockerReason: null,
+        lastPolicyBlockerAt: null,
+        restartCount: 0,
+      },
+    };
+  },
   async getMotionState() { return 'STILL' as MotionState; },
   async getInstalledApps() { return []; },
   async getForegroundApp() { return ''; },
@@ -123,6 +248,12 @@ const fallback: SceneBridgeNativeModule = {
   async setBrightness(level: number) { return { level, brightness: level }; },
   async checkWriteSettingsPermission() { return false; },
   async openWriteSettingsSettings() { return false; },
+  async isIgnoringBatteryOptimizations() { return false; },
+  async openBatteryOptimizationSettings() { return false; },
+  async requestIgnoreBatteryOptimizations() { return false; },
+  async isBackgroundRestricted() { return false; },
+  async isPowerSaveModeEnabled() { return false; },
+  async openBatterySaverSettings() { return false; },
   async openAppWithDeepLink(_packageName?: string, _deepLink?: string) { return false; },
   async isAppInstalled() { return false; },
   async validateDeepLink() { return false; },

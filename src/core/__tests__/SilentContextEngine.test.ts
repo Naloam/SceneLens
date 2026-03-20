@@ -223,6 +223,59 @@ describe('SilentContextEngine', () => {
       // 应该识别为 HOME 场景
       expect(context.context).toBe('HOME');
     });
+
+    it('ignores stale unknown locations so cached coordinates do not become evidence', async () => {
+      setMockTime('2024-01-15T10:00:00');
+
+      (sceneBridge.hasLocationPermission as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.getCurrentLocation as jest.Mock).mockResolvedValue({
+        latitude: 39.90,
+        longitude: 116.40,
+        accuracy: 120,
+        timestamp: Date.now() - 31 * 60 * 1000,
+        ageMs: 31 * 60 * 1000,
+        isStale: true,
+        source: 'last_known',
+      });
+      (sceneBridge.getMotionState as jest.Mock).mockResolvedValue('STILL' as MotionState);
+      (sceneBridge.getConnectedWiFi as jest.Mock).mockResolvedValue(null);
+      (sceneBridge.hasUsageStatsPermission as jest.Mock).mockResolvedValue(false);
+
+      const context = await engine.getContext();
+
+      expect(context.signals.find(s => s.type === 'LOCATION')).toBeUndefined();
+    });
+
+    it('marks stale geofenced locations as non-fresh instead of strong evidence', async () => {
+      engine.setGeoFences({
+        HOME: {
+          latitude: 39.92,
+          longitude: 116.42,
+          radius: 150,
+        },
+      });
+
+      (sceneBridge.hasLocationPermission as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.getCurrentLocation as jest.Mock).mockResolvedValue({
+        latitude: 39.92,
+        longitude: 116.42,
+        accuracy: 35,
+        timestamp: Date.now() - 15 * 60 * 1000,
+        ageMs: 15 * 60 * 1000,
+        isStale: true,
+        source: 'last_known',
+      });
+      (sceneBridge.getMotionState as jest.Mock).mockResolvedValue('STILL' as MotionState);
+      (sceneBridge.getConnectedWiFi as jest.Mock).mockResolvedValue(null);
+      (sceneBridge.hasUsageStatsPermission as jest.Mock).mockResolvedValue(false);
+
+      const context = await engine.getContext();
+      const locationSignal = context.signals.find(s => s.type === 'LOCATION');
+
+      expect(locationSignal).toBeDefined();
+      expect((locationSignal as any)?.isFresh).toBe(false);
+      expect(locationSignal?.weight).toBeLessThan(0.8);
+    });
   });
 
   describe('getTimeSignal', () => {
