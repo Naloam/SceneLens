@@ -129,7 +129,7 @@ describe('ModelRunner', () => {
   });
 
   describe('Error Handling', () => {
-    it('should handle image classification errors gracefully', async () => {
+    it('should report degraded image input instead of returning fallback predictions', async () => {
       // Test with invalid image data
       const invalidImageData: ImageData = {
         uri: '',
@@ -137,11 +137,14 @@ describe('ModelRunner', () => {
         height: 0
       };
 
-      // Should not throw, but handle gracefully
-      await expect(modelRunner.runImageClassification(invalidImageData)).resolves.toBeDefined();
+      const result = await modelRunner.runImageClassificationDetailed(invalidImageData);
+
+      expect(result.status).toBe('degraded_invalid_input');
+      expect(result.predictions).toEqual([]);
+      await expect(modelRunner.runImageClassification(invalidImageData)).resolves.toEqual([]);
     });
 
-    it('should handle audio classification errors gracefully', async () => {
+    it('should report degraded audio input instead of returning fallback predictions', async () => {
       // Test with invalid audio data
       const invalidAudioData: AudioData = {
         samples: new Float32Array(0),
@@ -149,8 +152,11 @@ describe('ModelRunner', () => {
         duration: 0
       };
 
-      // Should not throw, but handle gracefully
-      await expect(modelRunner.runAudioClassification(invalidAudioData)).resolves.toBeDefined();
+      const result = await modelRunner.runAudioClassificationDetailed(invalidAudioData);
+
+      expect(result.status).toBe('degraded_invalid_input');
+      expect(result.predictions).toEqual([]);
+      await expect(modelRunner.runAudioClassification(invalidAudioData)).resolves.toEqual([]);
     });
   });
 });

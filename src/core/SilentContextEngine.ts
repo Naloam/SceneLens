@@ -18,6 +18,7 @@ import {
 import { sceneBridge } from './SceneBridge';
 import { geoFenceManager } from '../stores/geoFenceManager';
 import { sceneCache, SceneCacheKeyBuilder } from '../utils/cacheManager';
+import { classifyDay } from '../services/suggestion/workdayCalendar';
 
 /**
  * 时间段定义
@@ -321,12 +322,12 @@ export class SilentContextEngine {
   getTimeSignal(): ContextSignal {
     const now = new Date();
     const timePeriod = this.getTimePeriod(now);
-    const isWeekday = this.isWeekday(now);
+    const isWorkday = this.isWorkday(now);
 
     // 根据时段和是否工作日调整权重
     // 通勤时段在工作日权重更高
     let weight = 0.7;
-    if ((timePeriod === 'MORNING_RUSH' || timePeriod === 'EVENING_RUSH') && isWeekday) {
+    if ((timePeriod === 'MORNING_RUSH' || timePeriod === 'EVENING_RUSH') && isWorkday) {
       weight = 0.85; // 工作日通勤时段权重更高
     } else if (timePeriod === 'LATE_NIGHT') {
       weight = 0.8; // 深夜时段权重较高（睡眠场景）
@@ -336,7 +337,7 @@ export class SilentContextEngine {
 
     return {
       type: 'TIME',
-      value: `${timePeriod}${isWeekday ? '_WEEKDAY' : '_WEEKEND'}`,
+      value: `${timePeriod}${isWorkday ? '_WEEKDAY' : '_WEEKEND'}`,
       weight,
       timestamp: now.getTime(),
     };
@@ -401,9 +402,8 @@ export class SilentContextEngine {
    * @param date 日期对象
    * @returns 是否为工作日
    */
-  private isWeekday(date: Date): boolean {
-    const day = date.getDay();
-    return day >= 1 && day <= 5;
+  private isWorkday(date: Date): boolean {
+    return classifyDay(date).isWorkday;
   }
 
   /**
@@ -788,7 +788,19 @@ export class SilentContextEngine {
     confidence = Math.max(0, Math.min(confidence, 1));
 
     // 如果是 UNKNOWN 场景但有时间信号，尝试根据时间推断一个更具体的场景
-    if (bestScene === 'UNKNOWN' && signalTypes.has('TIME')) {
+    const hasSpecificNonTimeEvidence = signals.some(signal =>
+      (signal.type === 'LOCATION' && !signal.value.includes('UNKNOWN') && (signal as any).isFresh !== false) ||
+      (signal.type === 'WIFI' && !signal.value.includes('UNKNOWN') && (signal as any).isFresh !== false) ||
+      signal.type === 'CALENDAR' ||
+      signal.type === 'FOREGROUND_APP'
+    );
+
+    if (bestScene !== 'UNKNOWN' && confidence < 0.55 && !hasSpecificNonTimeEvidence) {
+      bestScene = 'UNKNOWN';
+      confidence = Math.min(confidence, 0.5);
+    }
+
+    if (bestScene === 'UNKNOWN' && signalTypes.has('TIME') && hasSpecificNonTimeEvidence) {
       // 找到第二高分的非 UNKNOWN 场景
       let secondMaxScore = 0;
       let secondBestScene: SceneType = 'HOME'; // 默认家
@@ -801,7 +813,7 @@ export class SilentContextEngine {
       }
       
       // 如果第二高分场景有一定得分，使用它
-      if (secondMaxScore > 0) {
+      if (secondMaxScore >= 0.35) {
         bestScene = secondBestScene;
         confidence = Math.max(0, Math.min(confidence * 0.8, 1));
       }

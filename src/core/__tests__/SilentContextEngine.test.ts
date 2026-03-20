@@ -172,7 +172,7 @@ describe('SilentContextEngine', () => {
 
       const context = await engine.getContext();
 
-      expect(context.context).toBe('HOME');
+      expect(context.context).toBe('UNKNOWN');
       expect(context.confidence).toBeLessThan(0.65);
     });
 
@@ -312,6 +312,22 @@ describe('SilentContextEngine', () => {
       const signal = engine['getTimeSignal']();
 
       expect(signal.value).toContain('WEEKDAY');
+    });
+
+    it('treats adjusted weekend workdays as workdays for time signals', () => {
+      setMockTime('2026-02-15T08:00:00');
+
+      const signal = engine['getTimeSignal']();
+
+      expect(signal.value).toContain('WEEKDAY');
+    });
+
+    it('treats statutory weekday holidays as rest days for time signals', () => {
+      setMockTime('2026-02-18T08:00:00');
+
+      const signal = engine['getTimeSignal']();
+
+      expect(signal.value).toContain('WEEKEND');
     });
   });
 

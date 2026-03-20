@@ -356,7 +356,7 @@ describe('用户触发识别集成测试', () => {
       mockSceneBridge.hasMicrophonePermission.mockResolvedValue(true);
 
       const mockAudioData: AudioData = {
-        base64: 'mock-audio-data-base64',
+        base64: 'UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAA==',
         duration: 1000,
         sampleRate: 16000,
         format: 'WAV',
@@ -378,11 +378,11 @@ describe('用户触发识别集成测试', () => {
       // Verify microphone sampling
       expect(mockSceneBridge.hasMicrophonePermission).toHaveBeenCalled();
       expect(mockSceneBridge.recordAudio).toHaveBeenCalledWith(1000);
-      expect(mockModelRunner.runAudioClassification).toHaveBeenCalledWith({
-        samples: expect.any(Float32Array),
-        sampleRate: 16000,
-        duration: 1,
-      });
+      const audioInferenceInput = mockModelRunner.runAudioClassification.mock.calls[0][0];
+      expect(audioInferenceInput.samples).toBeInstanceOf(Float32Array);
+      expect(audioInferenceInput.samples.length).toBeGreaterThan(0);
+      expect(audioInferenceInput.sampleRate).toBe(16000);
+      expect(audioInferenceInput.duration).toBeGreaterThan(0);
 
       // Verify results
       expect(result.predictions).toHaveLength(2);

@@ -104,6 +104,56 @@ describe('UserTriggeredAnalyzer', () => {
       expect(mockModelRunner.runAudioClassification).toHaveBeenCalled();
     });
 
+    it('should expose degraded sources when detailed model output is degraded', async () => {
+      mockSceneBridge.hasCameraPermission.mockResolvedValue(true);
+      mockSceneBridge.hasMicrophonePermission.mockResolvedValue(true);
+
+      const mockImageData = {
+        base64: 'mock-image-data',
+        width: 224,
+        height: 224,
+        format: 'JPEG',
+        timestamp: Date.now(),
+      };
+
+      const mockAudioData = {
+        base64: 'mock-audio-data',
+        duration: 1000,
+        sampleRate: 16000,
+        format: 'WAV',
+        timestamp: Date.now(),
+      };
+
+      mockSceneBridge.captureImage.mockResolvedValue(mockImageData);
+      mockSceneBridge.recordAudio.mockResolvedValue(mockAudioData);
+
+      (mockModelRunner as any).runImageClassificationDetailed = jest.fn().mockResolvedValue({
+        modality: 'image',
+        status: 'degraded_invalid_input',
+        predictions: [],
+        reason: 'Image input validation failed',
+      });
+      (mockModelRunner as any).runAudioClassificationDetailed = jest.fn().mockResolvedValue({
+        modality: 'audio',
+        status: 'ok',
+        predictions: [{ label: 'speech', score: 0.7, index: 0 }],
+      });
+
+      const result = await analyzer.analyze();
+
+      expect(result.predictions).toHaveLength(1);
+      expect(result.predictions[0].label).toBe('audio:speech');
+      expect(result.degradedSources).toEqual([
+        {
+          source: 'image',
+          reason: 'degraded_invalid_input',
+          message: 'Image input validation failed',
+        },
+      ]);
+      expect(mockModelRunner.runImageClassification).not.toHaveBeenCalled();
+      expect(mockModelRunner.runAudioClassification).not.toHaveBeenCalled();
+    });
+
     it('should work with only camera permission', async () => {
       // Setup permissions - only camera
       mockSceneBridge.hasCameraPermission.mockResolvedValue(true);

@@ -120,6 +120,18 @@ export interface AudioData {
   duration: number;
 }
 
+export type ModelRunStatus =
+  | 'ok'
+  | 'degraded_invalid_input'
+  | 'degraded_empty_output';
+
+export interface ModelRunResult {
+  modality: 'image' | 'audio';
+  status: ModelRunStatus;
+  predictions: Prediction[];
+  reason?: string;
+}
+
 export interface ModelConfig {
   filename: string;
   type: 'image_classification' | 'audio_classification';
@@ -202,11 +214,19 @@ export class ModelRunner {
    * Run image classification on the provided image
    */
   async runImageClassification(imageData: ImageData): Promise<Prediction[]> {
+    const result = await this.runImageClassificationDetailed(imageData);
+    return result.predictions;
+  }
+
+  async runImageClassificationDetailed(imageData: ImageData): Promise<ModelRunResult> {
     // Validate input data
     const isValid = this.validateImageData(imageData);
     if (!isValid) {
-      // Return fallback predictions for invalid input
-      return this.getFallbackImagePredictions();
+      return this.createDegradedResult(
+        'image',
+        'degraded_invalid_input',
+        'Image input validation failed'
+      );
     }
     
     await this.loadImageModel();
@@ -229,9 +249,20 @@ export class ModelRunner {
       
       // Post-process results
       const predictions = this.parseImageOutput(output);
-      
+      if (predictions.length === 0) {
+        return this.createDegradedResult(
+          'image',
+          'degraded_empty_output',
+          'Image model produced no predictions above threshold'
+        );
+      }
+
       console.log('Image classification completed:', predictions.slice(0, 3));
-      return predictions;
+      return {
+        modality: 'image',
+        status: 'ok',
+        predictions,
+      };
     } catch (error) {
       console.error('Image classification failed:', error);
       throw new Error(`Image classification failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -242,11 +273,19 @@ export class ModelRunner {
    * Run audio classification on the provided audio data
    */
   async runAudioClassification(audioData: AudioData): Promise<Prediction[]> {
+    const result = await this.runAudioClassificationDetailed(audioData);
+    return result.predictions;
+  }
+
+  async runAudioClassificationDetailed(audioData: AudioData): Promise<ModelRunResult> {
     // Validate input data
     const isValid = this.validateAudioData(audioData);
     if (!isValid) {
-      // Return fallback predictions for invalid input
-      return this.getFallbackAudioPredictions();
+      return this.createDegradedResult(
+        'audio',
+        'degraded_invalid_input',
+        'Audio input validation failed'
+      );
     }
     
     await this.loadAudioModel();
@@ -269,9 +308,20 @@ export class ModelRunner {
       
       // Post-process results
       const predictions = this.parseAudioOutput(output);
-      
+      if (predictions.length === 0) {
+        return this.createDegradedResult(
+          'audio',
+          'degraded_empty_output',
+          'Audio model produced no predictions above threshold'
+        );
+      }
+
       console.log('Audio classification completed:', predictions.slice(0, 3));
-      return predictions;
+      return {
+        modality: 'audio',
+        status: 'ok',
+        predictions,
+      };
     } catch (error) {
       console.error('Audio classification failed:', error);
       throw new Error(`Audio classification failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -574,32 +624,18 @@ export class ModelRunner {
     return out;
   }
 
-  /**
-   * Get fallback predictions for invalid image input
-   */
-  private getFallbackImagePredictions(): Prediction[] {
-    const config = this.modelConfigs.mobilenet_v3_small;
-    return [
-      {
-        label: config.labels[0] || 'unknown',
-        score: 0.1,
-        index: 0
-      }
-    ];
-  }
-
-  /**
-   * Get fallback predictions for invalid audio input
-   */
-  private getFallbackAudioPredictions(): Prediction[] {
-    const config = this.modelConfigs.yamnet_lite;
-    return [
-      {
-        label: config.labels[0] || 'silence',
-        score: 0.1,
-        index: 0
-      }
-    ];
+  private createDegradedResult(
+    modality: 'image' | 'audio',
+    status: Extract<ModelRunStatus, 'degraded_invalid_input' | 'degraded_empty_output'>,
+    reason: string
+  ): ModelRunResult {
+    console.warn(`[ModelRunner] ${modality} inference degraded: ${reason}`);
+    return {
+      modality,
+      status,
+      predictions: [],
+      reason,
+    };
   }
 
   /**
@@ -650,12 +686,12 @@ export class ModelRunner {
    */
   private validateImageData(imageData: ImageData): boolean {
     if (!imageData.uri || imageData.uri.trim() === '') {
-      console.warn('Image URI is empty, using fallback');
+      console.warn('Image URI is empty, marking inference as degraded');
       return false;
     }
     
     if (imageData.width <= 0 || imageData.height <= 0) {
-      console.warn('Invalid image dimensions, using fallback');
+      console.warn('Invalid image dimensions, marking inference as degraded');
       return false;
     }
     
@@ -667,17 +703,17 @@ export class ModelRunner {
    */
   private validateAudioData(audioData: AudioData): boolean {
     if (!audioData.samples || audioData.samples.length === 0) {
-      console.warn('Audio samples are empty, using fallback');
+      console.warn('Audio samples are empty, marking inference as degraded');
       return false;
     }
     
     if (audioData.sampleRate <= 0) {
-      console.warn('Invalid sample rate, using fallback');
+      console.warn('Invalid sample rate, marking inference as degraded');
       return false;
     }
     
     if (audioData.duration <= 0) {
-      console.warn('Invalid duration, using fallback');
+      console.warn('Invalid duration, marking inference as degraded');
       return false;
     }
     

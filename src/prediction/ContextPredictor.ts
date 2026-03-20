@@ -12,14 +12,15 @@
 
 import { timePatternEngine } from './TimePatternEngine';
 import { behaviorAnalyzer } from './BehaviorAnalyzer';
-import type { SceneType, SilentContext } from '../types';
+import { sceneBridge } from '../core/SceneBridge';
+import { classifyDay } from '../services/suggestion/workdayCalendar';
+import type { SceneType, SilentContext, CalendarEvent } from '../types';
 import type {
   ScenePrediction,
   DepartureReminder,
   CalendarSuggestion,
   WeatherSuggestion,
   PredictionContext,
-  BehaviorPattern,
   PatternMatchResult,
 } from './types';
 
@@ -108,6 +109,7 @@ export class ContextPredictor {
   getPredictionContext(currentScene: SceneType): PredictionContext {
     const now = new Date();
     const day = now.getDay();
+    const dayClassification = classifyDay(now);
 
     let locationType: 'home' | 'office' | 'commute' | 'other' = 'other';
     switch (currentScene) {
@@ -129,7 +131,10 @@ export class ContextPredictor {
       currentScene,
       locationType,
       dayOfWeek: day || 7,
-      isWeekday: isWeekday(now),
+      isWeekday: dayClassification.isWorkday,
+      isWorkday: dayClassification.isWorkday,
+      isRestDay: dayClassification.isRestDay,
+      dayTypeLabel: dayClassification.dayTypeLabel,
     };
   }
 
@@ -160,7 +165,7 @@ export class ContextPredictor {
   private inferNextScene(currentScene: SceneType): ScenePrediction | null {
     const now = new Date();
     const hour = now.getHours();
-    const isWorkday = isWeekday(now);
+    const isWorkday = classifyDay(now).isWorkday;
 
     // 基于常识的场景转换规则
     const inferenceRules: Record<SceneType, { next: SceneType; conditions: () => boolean; minutesUntil: number }[]> = {
@@ -225,7 +230,7 @@ export class ContextPredictor {
     let targetTime: string | null = null;
     let targetScene: SceneType | null = null;
 
-    if (context.locationType === 'home' && context.isWeekday) {
+    if (context.locationType === 'home' && context.isWorkday) {
       // 在家，工作日 -> 提醒去上班
       targetTime = timePatternEngine.getUsualArrivalTime('OFFICE');
       targetScene = 'OFFICE';
@@ -263,6 +268,30 @@ export class ContextPredictor {
    * 注意：实际实现需要集成日历 API
    */
   async getCalendarAwareSuggestions(): Promise<CalendarSuggestion[]> {
+    try {
+      const hasPermission = await sceneBridge.hasCalendarPermission();
+      if (!hasPermission) {
+        return [];
+      }
+
+      const now = Date.now();
+      const events = await sceneBridge.getUpcomingEvents(12);
+      const suggestions: CalendarSuggestion[] = [];
+      const sortedEvents = [...events].sort((a, b) => a.startTime - b.startTime);
+
+      for (const event of sortedEvents.slice(0, 3)) {
+        const suggestion = this.buildCalendarSuggestion(event, now);
+        if (suggestion) {
+          suggestions.push(suggestion);
+        }
+      }
+
+      return suggestions;
+    } catch (error) {
+      console.warn('[ContextPredictor] Failed to load calendar suggestions:', error);
+      return [];
+    }
+
     // TODO: 集成设备日历 API
     // 这里提供模拟实现框架
     const suggestions: CalendarSuggestion[] = [];
@@ -302,6 +331,87 @@ export class ContextPredictor {
   /**
    * 获取当前上下文的行为建议
    */
+  private buildCalendarSuggestion(
+    event: CalendarEvent,
+    now: number
+  ): CalendarSuggestion | null {
+    if (event.endTime <= now) {
+      return null;
+    }
+
+    const minutesUntil = Math.max(0, Math.round((event.startTime - now) / (60 * 1000)));
+    const eventTime = this.formatEventTime(event.startTime);
+
+    if (this.isMeetingEvent(event)) {
+      return {
+        id: `meeting_${event.id}`,
+        eventTitle: event.title,
+        eventTime,
+        suggestion: minutesUntil <= 30
+          ? `还有 ${minutesUntil} 分钟开始会议，提前准备资料并确认入会方式`
+          : `今天 ${eventTime} 有会议，提前预留准备时间`,
+        type: minutesUntil <= 30 ? 'prepare' : 'reminder',
+        priority: minutesUntil <= 30 ? 'high' : 'medium',
+      };
+    }
+
+    if (this.isTravelEvent(event)) {
+      return {
+        id: `travel_${event.id}`,
+        eventTitle: event.title,
+        eventTime,
+        suggestion: minutesUntil <= 90
+          ? `还有 ${minutesUntil} 分钟开始行程，尽快确认票证和出发路线`
+          : `今天 ${eventTime} 有出行安排，提前检查票证与交通`,
+        type: 'travel',
+        priority: minutesUntil <= 90 ? 'high' : 'medium',
+      };
+    }
+
+    if (minutesUntil <= 60) {
+      return {
+        id: `event_${event.id}`,
+        eventTitle: event.title,
+        eventTime,
+        suggestion: `还有 ${minutesUntil} 分钟开始日程，建议提前查看地点和准备事项`,
+        type: 'reminder',
+        priority: 'medium',
+      };
+    }
+
+    return null;
+  }
+
+  private isMeetingEvent(event: Pick<CalendarEvent, 'title' | 'location' | 'description'>): boolean {
+    const content = [event.title, event.location || '', event.description || ''].join(' ').toLowerCase();
+    return (
+      content.includes('会议') ||
+      content.includes('meeting') ||
+      content.includes('call') ||
+      content.includes('面试') ||
+      content.includes('interview')
+    );
+  }
+
+  private isTravelEvent(event: Pick<CalendarEvent, 'title' | 'location' | 'description'>): boolean {
+    const content = [event.title, event.location || '', event.description || ''].join(' ').toLowerCase();
+    return (
+      content.includes('航班') ||
+      content.includes('flight') ||
+      content.includes('火车') ||
+      content.includes('train') ||
+      content.includes('高铁') ||
+      content.includes('机场') ||
+      content.includes('airport') ||
+      content.includes('station')
+    );
+  }
+
+  private formatEventTime(timestamp: number): string {
+    const date = new Date(timestamp);
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+
   async getContextualSuggestions(context: SilentContext): Promise<{
     prediction: ScenePrediction | null;
     departureReminder: DepartureReminder;

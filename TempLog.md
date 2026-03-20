@@ -1086,3 +1086,50 @@ This round:
     - real calendar input: done
     - weather: explicit no-fake-source stance applied
     - holiday / adjusted-workday: done with local snapshot support
+
+## 2026-03-20 continued: phase 3 closure (automatic detection and model quality)
+- `ModelRunner` degraded-result semantics are now truthful
+  - invalid image/audio input no longer returns fake low-confidence fallback predictions
+  - added explicit detailed result states:
+    - `ok`
+    - `degraded_invalid_input`
+    - `degraded_empty_output`
+  - legacy `runImageClassification()` / `runAudioClassification()` stay compatible but now surface empty predictions on degraded input instead of pretending success
+- `UserTriggeredAnalyzer` now preserves degraded inference facts
+  - when the runner reports degraded image/audio input, the analyzer keeps successful predictions from the other modality
+  - degraded sources are exposed through `TriggeredContext.degradedSources`
+  - WAV decode failure no longer fabricates a silence tensor; it now becomes a truthful degraded audio input
+- `ContextPredictor` truthfulness tightened
+  - prediction context now uses the local holiday / adjusted-workday snapshot instead of hardcoded Mon-Fri weekday logic
+  - `shouldRemindDeparture(...)` now respects real workday semantics:
+    - adjusted weekend workdays still remind
+    - statutory weekday holidays no longer fake a commute reminder
+  - `getCalendarAwareSuggestions()` now reads real `sceneBridge.getUpcomingEvents(...)` data and produces meeting / travel / generic reminders from actual calendar events
+- `SilentContextEngine` false-positive behavior tightened
+  - time signals now also use the local workday snapshot semantics
+  - low-confidence scene winners without specific non-time evidence are forced back to `UNKNOWN`
+  - the previous "time-only weak evidence still falls through to HOME" path is closed
+  - fallback from `UNKNOWN` to second-best scene now requires specific non-time evidence and a minimum score floor
+- tests added / updated
+  - `src/prediction/__tests__/ContextPredictor.test.ts`
+    - adjusted-workday departure reminder
+    - holiday suppression
+    - real meeting/travel calendar suggestion generation
+  - `src/core/__tests__/SilentContextEngine.test.ts`
+    - weak-evidence `UNKNOWN` expectation
+    - adjusted workday / holiday time-signal semantics
+  - `src/core/__tests__/UserTriggeredAnalyzer.test.ts`
+    - degraded source propagation
+  - `src/ml/__tests__/ModelRunner.test.ts`
+    - degraded invalid-input result assertions
+  - `src/__tests__/integration/user-triggered-recognition.test.ts`
+    - microphone sampling test now uses a genuinely parseable WAV sample instead of fake audio placeholder
+- validation after phase 3 closure
+  - `npm run typecheck`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --json --outputFile jest-results.json --forceExit`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --detectOpenHandles`
+  - all passed locally
+  - Jest totals: `43/43` suites, `419/419` tests
+- phase status
+  - phase 3 code-side scope from the master plan is now locally closed
+  - remaining verification item for this phase is still the deferred real-device validation batch, per current project instruction

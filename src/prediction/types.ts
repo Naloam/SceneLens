@@ -218,6 +218,9 @@ export interface PredictionContext {
   dayOfWeek: number;
   /** 是否工作日 */
   isWeekday: boolean;
+  isWorkday: boolean;
+  isRestDay: boolean;
+  dayTypeLabel: string;
 }
 
 // ==================== 存储类型 ====================

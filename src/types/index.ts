@@ -403,6 +403,16 @@ export interface Prediction {
   score: number;
 }
 
+export type TriggeredDegradationReason =
+  | 'degraded_invalid_input'
+  | 'degraded_empty_output';
+
+export interface TriggeredDegradation {
+  source: 'image' | 'audio';
+  reason: TriggeredDegradationReason;
+  message: string;
+}
+
 /**
  * 用户触发的上下文
  */
@@ -410,6 +420,7 @@ export interface TriggeredContext {
   timestamp: number;
   predictions: Prediction[];
   confidence: number;
+  degradedSources?: TriggeredDegradation[];
 }
 
 /**

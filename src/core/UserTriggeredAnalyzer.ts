@@ -8,10 +8,12 @@
 import { DeviceEventEmitter } from 'react-native';
 import { sceneBridge } from './SceneBridge';
 import { ModelRunner } from '../ml/ModelRunner';
+import type { ModelRunResult } from '../ml/ModelRunner';
 import { VolumeKeyListener, VolumeKeyEvent } from './VolumeKeyListener';
 import { ShortcutManager, ShortcutEvent } from './ShortcutManager';
 import type {
   TriggeredContext,
+  TriggeredDegradation,
   Prediction,
   ImageData,
   AudioData,
@@ -37,6 +39,11 @@ export interface UserTriggeredOptions {
    * 默认 2
    */
   maxRetries?: number;
+}
+
+interface InferenceAggregationResult {
+  predictions: Prediction[];
+  degradedSources: TriggeredDegradation[];
 }
 
 export class UserTriggeredAnalyzer {
@@ -103,7 +110,7 @@ export class UserTriggeredAnalyzer {
       );
 
       // 3. 模型推理
-      const predictions = await this.runModelInference(imageData, audioData);
+      const inference = await this.runModelInference(imageData, audioData);
 
       // 4. 清理敏感数据
       if (autoCleanup) {
@@ -112,14 +119,16 @@ export class UserTriggeredAnalyzer {
 
       const result: TriggeredContext = {
         timestamp: Date.now(),
-        predictions,
-        confidence: predictions.length > 0 ? predictions[0].score : 0,
+        predictions: inference.predictions,
+        confidence: inference.predictions.length > 0 ? inference.predictions[0].score : 0,
+        degradedSources: inference.degradedSources.length > 0 ? inference.degradedSources : undefined,
       };
 
       console.log('用户触发分析完成:', {
-        predictionsCount: predictions.length,
+        predictionsCount: inference.predictions.length,
         confidence: result.confidence,
-        topPrediction: predictions[0]?.label,
+        topPrediction: inference.predictions[0]?.label,
+        degradedSources: inference.degradedSources.length,
       });
 
       // 通知前端订阅者（例如 HomeScreen）
@@ -295,7 +304,7 @@ export class UserTriggeredAnalyzer {
   private async runModelInference(
     imageData: ImageData | null,
     audioData: AudioData | null
-  ): Promise<Prediction[]> {
+  ): Promise<InferenceAggregationResult> {
     if (!imageData && !audioData) {
       throw this.createError(
         ErrorCode.MODEL_INFERENCE_FAILED,
@@ -305,6 +314,7 @@ export class UserTriggeredAnalyzer {
 
     console.log('开始模型推理...');
     const allPredictions: Prediction[] = [];
+    const degradedSources: TriggeredDegradation[] = [];
 
     try {
       // 图像分类
@@ -313,7 +323,9 @@ export class UserTriggeredAnalyzer {
         try {
           // 转换为 ModelRunner 期望的格式
           const modelImageData = this.convertToModelImageData(imageData);
-          const imagePredictions = await this.modelRunner.runImageClassification(modelImageData);
+          const imageResult = await this.runDetailedImageClassification(modelImageData);
+          this.collectDegradedSource(degradedSources, imageResult);
+          const imagePredictions = imageResult.predictions;
           
           // 为图像预测添加标识
           const taggedImagePredictions = imagePredictions.map(pred => ({
@@ -335,7 +347,9 @@ export class UserTriggeredAnalyzer {
         try {
           // 转换为 ModelRunner 期望的格式
           const modelAudioData = this.convertToModelAudioData(audioData);
-          const audioPredictions = await this.modelRunner.runAudioClassification(modelAudioData);
+          const audioResult = await this.runDetailedAudioClassification(modelAudioData);
+          this.collectDegradedSource(degradedSources, audioResult);
+          const audioPredictions = audioResult.predictions;
           
           // 为音频预测添加标识
           const taggedAudioPredictions = audioPredictions.map(pred => ({
@@ -364,9 +378,13 @@ export class UserTriggeredAnalyzer {
       console.log('模型推理完成:', {
         totalPredictions: sortedPredictions.length,
         topPrediction: sortedPredictions[0],
+        degradedSources: degradedSources.length,
       });
 
-      return sortedPredictions;
+      return {
+        predictions: sortedPredictions,
+        degradedSources,
+      };
 
     } catch (error) {
       console.error('模型推理失败:', error);
@@ -404,12 +422,11 @@ export class UserTriggeredAnalyzer {
     const decoded = this.decodeWavPcm16(bytes);
 
     if (!decoded || decoded.samples.length === 0) {
-      console.warn('Failed to decode WAV audio, using silence fallback');
-      const sampleCount = Math.floor((audioData.duration / 1000) * audioData.sampleRate);
+      console.warn('Failed to decode WAV audio, returning degraded audio input');
       return {
-        samples: new Float32Array(Math.max(1, sampleCount)),
+        samples: new Float32Array(0),
         sampleRate: audioData.sampleRate,
-        duration: Math.max(0.001, audioData.duration / 1000),
+        duration: 0,
       };
     }
 
@@ -419,6 +436,75 @@ export class UserTriggeredAnalyzer {
       sampleRate: decoded.sampleRate,
       duration: durationSec,
     };
+  }
+
+  private async runDetailedImageClassification(imageData: {
+    uri: string;
+    width: number;
+    height: number;
+    rgbBase64?: string;
+  }): Promise<ModelRunResult> {
+    const detailedRunner = this.modelRunner as ModelRunner & {
+      runImageClassificationDetailed?: (input: {
+        uri: string;
+        width: number;
+        height: number;
+        rgbBase64?: string;
+      }) => Promise<ModelRunResult>;
+    };
+
+    if (typeof detailedRunner.runImageClassificationDetailed === 'function') {
+      return detailedRunner.runImageClassificationDetailed(imageData);
+    }
+
+    const predictions = await this.modelRunner.runImageClassification(imageData);
+    return {
+      modality: 'image',
+      status: predictions.length > 0 ? 'ok' : 'degraded_empty_output',
+      predictions,
+      reason: predictions.length > 0 ? undefined : 'Legacy image runner returned no predictions',
+    };
+  }
+
+  private async runDetailedAudioClassification(audioData: {
+    samples: Float32Array;
+    sampleRate: number;
+    duration: number;
+  }): Promise<ModelRunResult> {
+    const detailedRunner = this.modelRunner as ModelRunner & {
+      runAudioClassificationDetailed?: (input: {
+        samples: Float32Array;
+        sampleRate: number;
+        duration: number;
+      }) => Promise<ModelRunResult>;
+    };
+
+    if (typeof detailedRunner.runAudioClassificationDetailed === 'function') {
+      return detailedRunner.runAudioClassificationDetailed(audioData);
+    }
+
+    const predictions = await this.modelRunner.runAudioClassification(audioData);
+    return {
+      modality: 'audio',
+      status: predictions.length > 0 ? 'ok' : 'degraded_empty_output',
+      predictions,
+      reason: predictions.length > 0 ? undefined : 'Legacy audio runner returned no predictions',
+    };
+  }
+
+  private collectDegradedSource(
+    degradedSources: TriggeredDegradation[],
+    result: ModelRunResult
+  ): void {
+    if (result.status === 'ok') {
+      return;
+    }
+
+    degradedSources.push({
+      source: result.modality,
+      reason: result.status,
+      message: result.reason || `${result.modality} inference degraded`,
+    });
   }
 
   private decodeBase64ToBytes(base64: string): Uint8Array {
