@@ -618,44 +618,6 @@ export const LocationConfigScreen: React.FC = () => {
     return;
   };
 
-  /**
-   * 从剪贴板粘贴坐标
-   */
-  const pasteFromClipboard = async () => {
-    try {
-      // React Native 需要使用 @react-native-clipboard/clipboard 包
-      // 这里提供一个简化的提示
-      Alert.alert(
-        '粘贴坐标',
-        '请在输入框中长按粘贴坐标。\n\n支持的格式：\n• 39.9042, 116.4074\n• 39.9042,116.4074\n• 纬度：39.9042 经度：116.4074',
-        [{ text: '知道了' }]
-      );
-    } catch (error) {
-      console.error('粘贴失败:', error);
-    }
-  };
-
-  /**
-   * 解析粘贴的坐标字符串
-   */
-  const parseCoordinateString = (text: string): { lat: string; lng: string } | null => {
-    // 尝试匹配常见的坐标格式
-    const patterns = [
-      /(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/,  // 39.9042, 116.4074
-      /纬度[：:]\s*(-?\d+\.?\d*)\s*经度[：:]\s*(-?\d+\.?\d*)/,
-      /lat[：:]\s*(-?\d+\.?\d*)\s*lng[：:]\s*(-?\d+\.?\d*)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = text.match(pattern);
-      if (match) {
-        return { lat: match[1], lng: match[2] };
-      }
-    }
-
-    return null;
-  };
-
   const importFromPastedText = async () => {
     try {
       Keyboard.dismiss();
@@ -1061,6 +1023,10 @@ export const LocationConfigScreen: React.FC = () => {
               multiline
             />
 
+            <Text variant="bodySmall" style={styles.importSourceHint}>
+              当前不会直接读取系统剪贴板；请先复制后粘贴，或从地图应用分享位置内容回 SceneLens。
+            </Text>
+
             <View style={styles.modalActions}>
               <Button
                 mode="outlined"
@@ -1293,6 +1259,12 @@ const styles = StyleSheet.create({
   coordinateHint: {
     opacity: 0.6,
     marginBottom: 20,
+    lineHeight: 18,
+  },
+  importSourceHint: {
+    opacity: 0.6,
+    marginTop: -8,
+    marginBottom: 12,
     lineHeight: 18,
   },
   modalActions: {

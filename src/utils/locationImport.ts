@@ -44,7 +44,15 @@ export function extractCoordinatesFromText(text: string): ImportedCoordinates | 
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
     },
     {
+      pattern: /(?:^|[?&])(?:query|center|ll|sll)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i,
+      map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
+    },
+    {
       pattern: /(?:^|[?&])q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i,
+      map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
+    },
+    {
+      pattern: /(?:^|[?&])(?:query|q)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\([^)]*\)/i,
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
     },
     {
@@ -68,8 +76,16 @@ export function extractCoordinatesFromText(text: string): ImportedCoordinates | 
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
     },
     {
+      pattern: /经度[：:\s]+(-?\d+(?:\.\d+)?)\s*[，, ]+\s*纬度[：:\s]+(-?\d+(?:\.\d+)?)/i,
+      map: (match) => buildCoordinates(Number.parseFloat(match[2]), Number.parseFloat(match[1])),
+    },
+    {
       pattern: /lat(?:itude)?[：:\s=]+(-?\d+(?:\.\d+)?)\s*[，, ]+\s*(?:lng|lon|longitude)[：:\s=]+(-?\d+(?:\.\d+)?)/i,
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
+    },
+    {
+      pattern: /(?:lng|lon|longitude)[：:\s=]+(-?\d+(?:\.\d+)?)\s*[，, ]+\s*lat(?:itude)?[：:\s=]+(-?\d+(?:\.\d+)?)/i,
+      map: (match) => buildCoordinates(Number.parseFloat(match[2]), Number.parseFloat(match[1])),
     },
   ];
 

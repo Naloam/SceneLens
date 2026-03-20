@@ -1133,3 +1133,47 @@ This round:
 - phase status
   - phase 3 code-side scope from the master plan is now locally closed
   - remaining verification item for this phase is still the deferred real-device validation batch, per current project instruction
+
+## 2026-03-20 continued: phase 4 closure (map import code-side closure before device batch)
+- phase interpretation aligned to the master plan and current project instruction
+  - the master plan's phase 4 asks for:
+    - map app share-import matrix
+    - broader parser coverage
+    - optional in-app picker only if needed
+  - per the current instruction, real-device verification is still deferred until the full feature set is finished
+  - so this round only closed the code-side truthfulness and parser/test gaps; it did not claim the device matrix is executed
+- `src/utils/locationImport.ts` coverage expanded for real map-share formats
+  - added support for common coordinate query keys:
+    - `query=`
+    - `center=`
+    - `ll=`
+    - `sll=`
+  - added support for labeled `q=` / `query=` values such as:
+    - `geo:0,0?q=31.2304,121.4737(SceneLens)`
+  - added reversed-order labeled text parsing:
+    - `经度 ... 纬度 ...`
+    - `longitude ... latitude ...`
+- `src/utils/__tests__/locationImport.test.ts` now behaves like a sample library for realistic imports
+  - added provider-style samples for:
+    - AMap
+    - Baidu Map
+    - Tencent Map
+    - Google Maps search / directions
+    - Apple Maps
+    - SceneLens callback links
+  - added reversed-order text cases and explicit invalid / unsupported cases
+- `src/screens/LocationConfigScreen.tsx` truthfulness tightened without opening a new module
+  - removed dead unused helpers that implied a clipboard-driven path existed locally
+  - added explicit UI copy that the app does not directly read the system clipboard in this flow
+  - kept map open semantics truthful:
+    - open/view/copy/share-back only
+    - not automatic point-pick completion
+- validation after phase 4 closure
+  - `npm run typecheck`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --json --outputFile jest-results.json --forceExit`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --detectOpenHandles`
+  - all passed locally
+  - Jest totals: `43/43` suites, `429/429` tests
+- phase status
+  - phase 4 code-side closure is now locally closed
+  - the remaining phase 4 device matrix execution is intentionally deferred into the later full-device verification batch
