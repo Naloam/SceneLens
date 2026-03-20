@@ -17,6 +17,7 @@ import type {
 import { feedbackLogger, FeedbackLogger, FeedbackStats } from '../reflection/FeedbackLogger';
 import { weightAdjuster, WeightAdjuster } from '../reflection/WeightAdjuster';
 import { storageManager } from '../stores/storageManager';
+import { classifyDay } from './suggestion/workdayCalendar';
 
 interface DynamicSuggestionDependencies {
   feedbackLogger: Pick<FeedbackLogger, 'initialize' | 'getStats'>;
@@ -97,6 +98,10 @@ export interface DynamicSuggestionPackage {
     hour: number;
     dayOfWeek: number;
     isWeekend: boolean;
+    isHoliday: boolean;
+    isWorkday: boolean;
+    isRestDay: boolean;
+    dayTypeLabel: '工作日' | '周末' | '休息日';
   };
   /** 个性化说明 */
   personalizedNotes: string[];
@@ -346,13 +351,17 @@ export class DynamicSuggestionService {
    */
   private getTimeContext(): DynamicSuggestionPackage['context'] {
     const now = new Date();
-    const dayOfWeek = now.getDay();
+    const dayClassification = classifyDay(now);
     
     return {
       timeOfDay: this.getTimeOfDay(now),
       hour: now.getHours(),
-      dayOfWeek,
-      isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
+      dayOfWeek: now.getDay(),
+      isWeekend: dayClassification.isWeekend,
+      isHoliday: dayClassification.isHoliday,
+      isWorkday: dayClassification.isWorkday,
+      isRestDay: dayClassification.isRestDay,
+      dayTypeLabel: dayClassification.dayTypeLabel,
     };
   }
 
@@ -593,8 +602,16 @@ export class DynamicSuggestionService {
     }
 
     // 周末特殊说明
-    if (context.isWeekend && sceneType === 'OFFICE') {
-      notes.push('💡 周末也在工作？记得给自己放个假');
+    if (sceneType === 'OFFICE') {
+      if (context.isWeekend && context.isWorkday) {
+        notes.push('💡 今天是调休工作日，办公建议按工作日处理');
+      } else if (!context.isWorkday) {
+        notes.push(
+          context.dayTypeLabel === '周末'
+            ? '💡 周末还在处理工作，记得给自己留点休息时间'
+            : '💡 今天是休息日，如非必要可稍后处理工作'
+        );
+      }
     }
 
     return notes;

@@ -157,4 +157,46 @@ describe('DynamicSuggestionService', () => {
       usageCount: 1,
     });
   });
+
+  it('uses local adjusted-workday facts instead of weekend heuristics in dynamic context', async () => {
+    jest.setSystemTime(new Date(2026, 4, 9, 9, 0, 0));
+    const deps = createDependencies();
+    const service = new DynamicSuggestionService(deps);
+
+    const suggestion = await service.generateDynamicSuggestions('OFFICE', {
+      systemAdjustments: [],
+      appLaunches: [],
+      oneTapActions: [],
+    });
+
+    expect(suggestion.context).toMatchObject({
+      isWeekend: true,
+      isHoliday: false,
+      isWorkday: true,
+      isRestDay: false,
+      dayTypeLabel: '工作日',
+    });
+    expect(suggestion.personalizedNotes).toContain('💡 今天是调休工作日，办公建议按工作日处理');
+  });
+
+  it('marks statutory holidays as rest days in office dynamic notes', async () => {
+    jest.setSystemTime(new Date(2026, 4, 4, 9, 0, 0));
+    const deps = createDependencies();
+    const service = new DynamicSuggestionService(deps);
+
+    const suggestion = await service.generateDynamicSuggestions('OFFICE', {
+      systemAdjustments: [],
+      appLaunches: [],
+      oneTapActions: [],
+    });
+
+    expect(suggestion.context).toMatchObject({
+      isWeekend: false,
+      isHoliday: true,
+      isWorkday: false,
+      isRestDay: true,
+      dayTypeLabel: '休息日',
+    });
+    expect(suggestion.personalizedNotes).toContain('💡 今天是休息日，如非必要可稍后处理工作');
+  });
 });

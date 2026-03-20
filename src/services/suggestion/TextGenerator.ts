@@ -6,6 +6,7 @@
 
 import type { AggregatedContext, TimeOfDayType } from './types';
 import { classifyDay } from './workdayCalendar';
+import { getPreferredAppName } from './preferredAppResolver';
 
 /**
  * 内置槽位填充函数类型
@@ -151,8 +152,9 @@ const BUILT_IN_SLOT_FILLERS: Record<string, SlotFiller> = {
 
   // 明天类型
   tomorrow_type: (ctx) => {
-    const tomorrow = (ctx.time.dayOfWeek + 1) % 7;
-    return (tomorrow === 0 || tomorrow === 6) ? '周末' : '工作日';
+    const tomorrow = new Date(ctx.timestamp);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return classifyDay(tomorrow).dayTypeLabel;
   },
 
   // 明天星期几
@@ -193,7 +195,9 @@ const BUILT_IN_SLOT_FILLERS: Record<string, SlotFiller> = {
 
   // 工作提示
   work_hint: (ctx) => {
-    if (ctx.time.isWeekend) return '周末';
+    if (!ctx.time.isWorkday) {
+      return ctx.time.isWeekend ? '周末' : '休息日';
+    }
     if (ctx.time.hour >= 19) return '加班';
     return '工作';
   },
@@ -266,7 +270,9 @@ const BUILT_IN_SLOT_FILLERS: Record<string, SlotFiller> = {
 
   // 闹钟提示
   alarm_hint: (ctx) => {
-    if (ctx.time.isWeekend) return '周末可以睡个懒觉';
+    if (!ctx.time.isWorkday) {
+      return ctx.time.isWeekend ? '周末可以睡个懒觉' : '休息日可以少设点闹钟';
+    }
     return '记得设好闹钟';
   },
 
@@ -296,13 +302,13 @@ const BUILT_IN_SLOT_FILLERS: Record<string, SlotFiller> = {
   },
 
   // 会议应用
-  meeting_app: () => '腾讯会议',
+  meeting_app: () => getPreferredAppName('MEETING_APP', '会议应用'),
 
   // 会议时长
   event_duration: (ctx) => (ctx.calendar.upcomingEvent?.durationMinutes || 60).toString(),
 
   // 会议地点
-  event_location: (ctx) => ctx.calendar.upcomingEvent?.location || '线上会议',
+  event_location: (ctx) => ctx.calendar.upcomingEvent?.location || '地点待确认',
 };
 
 /**
@@ -469,27 +475,3 @@ export class TextGenerator {
 // 导出单例
 export const textGenerator = new TextGenerator();
 export default textGenerator;
-
-Object.assign(BUILT_IN_SLOT_FILLERS, {
-  tomorrow_type: () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return classifyDay(tomorrow).dayTypeLabel;
-  },
-  work_hint: (ctx: AggregatedContext) => {
-    if (!ctx.time.isWorkday) {
-      return ctx.time.isWeekend ? '周末' : '休息日';
-    }
-    if (ctx.time.hour >= 19) {
-      return '加班';
-    }
-    return '工作';
-  },
-  weather: () => '待确认',
-  alarm_hint: (ctx: AggregatedContext) => {
-    if (!ctx.time.isWorkday) {
-      return ctx.time.isWeekend ? '周末可以睡个懒觉' : '休息日可以少设点闹钟';
-    }
-    return '记得设好闹钟';
-  },
-});

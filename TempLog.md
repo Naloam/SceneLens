@@ -1177,3 +1177,41 @@ This round:
 - phase status
   - phase 4 code-side closure is now locally closed
   - the remaining phase 4 device matrix execution is intentionally deferred into the later full-device verification batch
+
+## 2026-03-20 continued: phase 5 closure (real context intake in suggestion layer)
+- phase interpretation aligned to the master plan
+  - target: remove the most obvious simulated capabilities in the suggestion layer
+  - this round stayed inside the suggestion-text / dynamic-suggestion path, without reopening unrelated modules
+- `DynamicSuggestionService` now uses the local statutory-holiday / adjusted-workday snapshot
+  - dynamic suggestion context now carries:
+    - `isHoliday`
+    - `isWorkday`
+    - `isRestDay`
+    - `dayTypeLabel`
+  - `OFFICE` dynamic notes no longer equate "weekend" with "rest day"
+  - adjusted-workday weekends now get explicit workday semantics instead of fake weekend copy
+  - weekday statutory holidays now get explicit rest-day copy
+- meeting suggestion text is now tied to local preferred-app facts instead of fake labels
+  - added a shared preferred-app label resolver based on `appPreferenceStore`
+  - `{meeting_app}` in `TextGenerator` now resolves to the current preferred meeting app name
+  - `ActionReasonGenerator` now also replaces `{meeting_app}` in action-reason templates
+  - this closes a user-visible bug where the literal `{meeting_app}` placeholder could leak into office meeting action reasons
+- calendar-detail truthfulness tightened
+  - `event_location` no longer fabricates `线上会议` when the calendar event itself has no location
+  - it now renders the neutral text `地点待确认`
+- tests added / updated
+  - `src/services/__tests__/DynamicSuggestionService.test.ts`
+    - adjusted-workday dynamic context semantics
+    - statutory-holiday rest-day semantics
+  - `src/services/suggestion/__tests__/templateAuthenticity.test.ts`
+    - preferred meeting-app label resolution
+    - neutral meeting location fallback
+- validation after phase 5 closure
+  - `npm run typecheck`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --json --outputFile jest-results.json --forceExit`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --detectOpenHandles`
+  - all passed locally
+  - Jest totals: `44/44` suites, `433/433` tests
+- phase status
+  - phase 5 code-side closure is now locally closed
+  - remaining verification still belongs to the later end-to-end real-device batch, per current project instruction

@@ -6,6 +6,7 @@
 
 import type { AppCategory } from '../../types';
 import type { AggregatedContext } from './types';
+import { getPreferredAppName } from './preferredAppResolver';
 
 /**
  * 动作类型
@@ -156,10 +157,11 @@ const MUSIC_APP_REASONS: Record<string, ReasonGenerator> = {
  */
 const MEETING_APP_REASONS: Record<string, ReasonGenerator> = {
   upcoming_meeting: (ctx) => {
+    const meetingAppName = getPreferredAppName('MEETING_APP', '会议应用');
     if (ctx.calendar.upcomingEvent) {
-      return `一键打开会议应用，准备加入"${ctx.calendar.upcomingEvent.title}"`;
+      return `一键打开${meetingAppName}，准备加入"${ctx.calendar.upcomingEvent.title}"`;
     }
-    return '会议即将开始，打开会议应用';
+    return `会议即将开始，打开${meetingAppName}`;
   },
   
   view_details: () => '查看会议详情和议程',
@@ -415,6 +417,8 @@ export class ActionReasonGenerator {
    * 填充理由模板中的槽位
    */
   private fillReasonTemplate(template: string, ctx: AggregatedContext): string {
+    const meetingAppName = getPreferredAppName('MEETING_APP', '会议应用');
+
     return template
       .replace(/\{battery\}/g, ctx.device.batteryLevel.toString())
       .replace(/\{hour\}/g, ctx.time.hour.toString())
@@ -422,6 +426,7 @@ export class ActionReasonGenerator {
       .replace(/\{audio_label\}/g, ctx.audio.topLabel || '环境音')
       .replace(/\{image_label\}/g, ctx.image.topLabel || '当前位置')
       .replace(/\{specific_place\}/g, ctx.image.specificPlace || '当前位置')
+      .replace(/\{meeting_app\}/g, meetingAppName)
       .replace(/\{event_title\}/g, ctx.calendar.upcomingEvent?.title || '会议')
       .replace(/\{minutes\}/g, (ctx.calendar.upcomingEvent?.minutesUntil || 0).toString());
   }
