@@ -162,4 +162,32 @@ describe('ContextPredictor', () => {
       eventTitle: 'Flight MU5108',
     });
   });
+
+  it('marks in-progress meetings as ongoing instead of saying they start in 0 minutes', async () => {
+    setMockTime('2026-03-20T09:00:00');
+    mockSceneBridge.hasCalendarPermission.mockResolvedValue(true);
+
+    const now = Date.now();
+    const events: CalendarEvent[] = [
+      {
+        id: 'meeting-live',
+        title: 'Weekly Meeting',
+        startTime: now - 10 * 60 * 1000,
+        endTime: now + 20 * 60 * 1000,
+        location: 'Conference Room B',
+      },
+    ];
+    mockSceneBridge.getUpcomingEvents.mockResolvedValue(events);
+
+    const suggestions = await predictor.getCalendarAwareSuggestions();
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      id: 'meeting_meeting-live',
+      eventTime: '进行中',
+      type: 'prepare',
+      priority: 'high',
+    });
+    expect(suggestions[0].suggestion).toContain('会议进行中');
+  });
 });

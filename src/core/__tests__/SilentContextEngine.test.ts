@@ -189,6 +189,36 @@ describe('SilentContextEngine', () => {
       expect(locationSignal).toBeUndefined();
     });
 
+    it('应该优先选择当前进行中的日历事件，即使返回顺序未排序', async () => {
+      setMockTime('2026-03-20T09:00:00');
+
+      (sceneBridge.hasCalendarPermission as jest.Mock).mockResolvedValue(true);
+      (sceneBridge.hasLocationPermission as jest.Mock).mockResolvedValue(false);
+      (sceneBridge.hasUsageStatsPermission as jest.Mock).mockResolvedValue(false);
+      (sceneBridge.getUpcomingEvents as jest.Mock).mockResolvedValue([
+        {
+          id: 'later-general',
+          title: '项目复盘',
+          startTime: Date.now() + 90 * 60 * 1000,
+          endTime: Date.now() + 150 * 60 * 1000,
+          location: '',
+        },
+        {
+          id: 'current-meeting',
+          title: 'Project Review Meeting',
+          startTime: Date.now() - 5 * 60 * 1000,
+          endTime: Date.now() + 25 * 60 * 1000,
+          location: 'Conference Room A',
+        },
+      ]);
+
+      const context = await engine.getContext();
+
+      const calendarSignal = context.signals.find(s => s.type === 'CALENDAR');
+      expect(calendarSignal).toBeDefined();
+      expect(calendarSignal?.value).toBe('MEETING_NOW');
+    });
+
     it('应该正确使用地理位置围栏', async () => {
       // Mock 地理围栏
       (geoFenceManager.getAllGeoFences as jest.Mock).mockReturnValue([

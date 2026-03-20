@@ -291,26 +291,6 @@ export class ContextPredictor {
       console.warn('[ContextPredictor] Failed to load calendar suggestions:', error);
       return [];
     }
-
-    // TODO: 集成设备日历 API
-    // 这里提供模拟实现框架
-    const suggestions: CalendarSuggestion[] = [];
-    const now = new Date();
-    const hour = now.getHours();
-
-    // 模拟：早上提醒今日日程
-    if (hour >= 7 && hour < 9) {
-      suggestions.push({
-        id: 'morning_schedule',
-        eventTitle: '今日日程概览',
-        eventTime: '全天',
-        suggestion: '查看今日日程安排',
-        type: 'reminder',
-        priority: 'medium',
-      });
-    }
-
-    return suggestions;
   }
 
   /**
@@ -339,10 +319,22 @@ export class ContextPredictor {
       return null;
     }
 
+    const isOngoing = event.startTime <= now && event.endTime > now;
     const minutesUntil = Math.max(0, Math.round((event.startTime - now) / (60 * 1000)));
-    const eventTime = this.formatEventTime(event.startTime);
+    const eventTime = isOngoing ? '进行中' : this.formatEventTime(event.startTime);
 
     if (this.isMeetingEvent(event)) {
+      if (isOngoing) {
+        return {
+          id: `meeting_${event.id}`,
+          eventTitle: event.title,
+          eventTime,
+          suggestion: '会议进行中，建议保持勿扰并聚焦当前议程',
+          type: 'prepare',
+          priority: 'high',
+        };
+      }
+
       return {
         id: `meeting_${event.id}`,
         eventTitle: event.title,
@@ -356,6 +348,17 @@ export class ContextPredictor {
     }
 
     if (this.isTravelEvent(event)) {
+      if (isOngoing) {
+        return {
+          id: `travel_${event.id}`,
+          eventTitle: event.title,
+          eventTime,
+          suggestion: '行程进行中，留意检票、换乘和下一段路线',
+          type: 'travel',
+          priority: 'high',
+        };
+      }
+
       return {
         id: `travel_${event.id}`,
         eventTitle: event.title,
@@ -365,6 +368,17 @@ export class ContextPredictor {
           : `今天 ${eventTime} 有出行安排，提前检查票证与交通`,
         type: 'travel',
         priority: minutesUntil <= 90 ? 'high' : 'medium',
+      };
+    }
+
+    if (isOngoing) {
+      return {
+        id: `event_${event.id}`,
+        eventTitle: event.title,
+        eventTime,
+        suggestion: '当前日程进行中，建议先专注处理手头事项',
+        type: 'reminder',
+        priority: 'medium',
       };
     }
 

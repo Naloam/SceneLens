@@ -1215,3 +1215,43 @@ This round:
 - phase status
   - phase 5 code-side closure is now locally closed
   - remaining verification still belongs to the later end-to-end real-device batch, per current project instruction
+
+## 2026-03-20 continued: phase 6 closure (automatic detection and model quality hardening)
+- phase interpretation aligned to the master plan
+  - target: improve accuracy, stability, and explainability in the automatic-detection / model-quality chain
+  - this round stayed inside:
+    - `SilentContextEngine`
+    - `ContextPredictor`
+    - `ModelRunner`
+- `ModelRunner` degraded-result coverage is now more complete
+  - runtime failures during model load / preprocessing / inference no longer bubble up as hard failures from the detailed runner path
+  - added a new explicit degraded status:
+    - `degraded_runtime_failure`
+  - legacy `runImageClassification()` / `runAudioClassification()` still stay compatible and now resolve to `[]` on runtime-degraded inference instead of throwing
+- `ContextPredictor` calendar suggestion semantics tightened
+  - ongoing meetings / trips are no longer described as "0 minutes until start"
+  - ongoing meeting suggestions now render as `进行中` with active-state wording
+  - removed unreachable leftover simulated calendar-suggestion code after the real calendar path
+- `SilentContextEngine` calendar signal quality tightened
+  - calendar signal selection now:
+    - filters out already-ended events
+    - sorts events by start time
+    - prefers the current in-progress event before later upcoming events
+  - generic calendar events are now emitted as `GENERAL_*` instead of the previous `EVENT_*` mismatch, so they no longer silently fall through the mapping layer
+- tests added / updated
+  - `src/ml/__tests__/ModelRunner.test.ts`
+    - image runtime failure -> degraded result
+    - audio runtime failure -> degraded result
+  - `src/prediction/__tests__/ContextPredictor.test.ts`
+    - ongoing meeting suggestion wording
+  - `src/core/__tests__/SilentContextEngine.test.ts`
+    - unsorted calendar events still choose the current meeting signal
+- validation after phase 6 closure
+  - `npm run typecheck`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --json --outputFile jest-results.json --forceExit`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --detectOpenHandles`
+  - all passed locally
+  - Jest totals: `44/44` suites, `437/437` tests
+- phase status
+  - phase 6 code-side closure is now locally closed
+  - remaining verification still belongs to the later end-to-end real-device batch, per current project instruction

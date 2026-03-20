@@ -1389,42 +1389,33 @@ export class SilentContextEngine {
         return null;
       }
 
-      // 分析最近的事件
       const now = Date.now();
-      const upcomingEvent = events[0];
+      const relevantEvents = events
+        .filter((event) => event.endTime > now)
+        .sort((a, b) => a.startTime - b.startTime);
+
+      if (relevantEvents.length === 0) {
+        return null;
+      }
+
+      const currentEvent =
+        relevantEvents.find((event) => event.startTime <= now && event.endTime > now) ?? null;
+      const upcomingEvent =
+        currentEvent ?? relevantEvents.find((event) => event.startTime > now) ?? null;
+
+      if (!upcomingEvent) {
+        return null;
+      }
+
       const timeUntilEvent = upcomingEvent.startTime - now;
       const minutesUntilEvent = timeUntilEvent / (60 * 1000);
-
-      // 判断事件类型
-      let eventType = 'EVENT';
-      const titleLower = upcomingEvent.title.toLowerCase();
-      const locationLower = (upcomingEvent.location || '').toLowerCase();
-
-      // 会议类型检测
-      if (titleLower.includes('会议') || 
-          titleLower.includes('meeting') ||
-          titleLower.includes('电话') ||
-          titleLower.includes('call') ||
-          titleLower.includes('面试') ||
-          titleLower.includes('interview')) {
-        eventType = 'MEETING';
-      }
-      // 出行类型检测
-      else if (titleLower.includes('航班') || 
-               titleLower.includes('flight') ||
-               titleLower.includes('火车') ||
-               titleLower.includes('train') ||
-               titleLower.includes('高铁') ||
-               locationLower.includes('机场') ||
-               locationLower.includes('airport') ||
-               locationLower.includes('火车站') ||
-               locationLower.includes('station')) {
-        eventType = 'TRAVEL';
-      }
+      const eventType = this.classifyCalendarEventType(upcomingEvent);
 
       // 根据距离事件开始的时间调整权重
       let weight = 0.5;
-      if (minutesUntilEvent <= 15) {
+      if (minutesUntilEvent <= 0) {
+        weight = 0.9; // 正在进行中的事件
+      } else if (minutesUntilEvent <= 15) {
         weight = 0.9; // 15分钟内，高权重
       } else if (minutesUntilEvent <= 30) {
         weight = 0.8; // 30分钟内
@@ -1433,7 +1424,8 @@ export class SilentContextEngine {
       }
 
       // 返回信号值格式：事件类型_距离时间
-      const timeLabel = minutesUntilEvent <= 15 ? 'IMMINENT' : 
+      const timeLabel = minutesUntilEvent <= 0 ? 'NOW' :
+                       minutesUntilEvent <= 15 ? 'IMMINENT' : 
                        minutesUntilEvent <= 30 ? 'SOON' : 'UPCOMING';
 
       return {
@@ -1446,6 +1438,45 @@ export class SilentContextEngine {
       console.warn('Failed to get calendar signal:', error);
       return null;
     }
+  }
+
+  private classifyCalendarEventType(event: {
+    title: string;
+    location?: string;
+    description?: string;
+  }): 'MEETING' | 'TRAVEL' | 'GENERAL' {
+    const content = [
+      event.title,
+      event.location || '',
+      event.description || '',
+    ].join(' ').toLowerCase();
+
+    if (
+      content.includes('会议') ||
+      content.includes('meeting') ||
+      content.includes('电话') ||
+      content.includes('call') ||
+      content.includes('面试') ||
+      content.includes('interview')
+    ) {
+      return 'MEETING';
+    }
+
+    if (
+      content.includes('航班') ||
+      content.includes('flight') ||
+      content.includes('火车') ||
+      content.includes('train') ||
+      content.includes('高铁') ||
+      content.includes('机场') ||
+      content.includes('airport') ||
+      content.includes('火车站') ||
+      content.includes('station')
+    ) {
+      return 'TRAVEL';
+    }
+
+    return 'GENERAL';
   }
 
   /**

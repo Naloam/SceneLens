@@ -158,5 +158,42 @@ describe('ModelRunner', () => {
       expect(result.predictions).toEqual([]);
       await expect(modelRunner.runAudioClassification(invalidAudioData)).resolves.toEqual([]);
     });
+
+    it('should report degraded image runtime failures instead of throwing', async () => {
+      const imageData: ImageData = {
+        uri: 'file://test-image.jpg',
+        width: 640,
+        height: 480,
+        rgbBase64: 'AAECAwQFBgcICQ==',
+      };
+
+      (modelRunner as any).imageModel = { run: jest.fn() };
+      (modelRunner as any).preprocessImage = jest.fn().mockRejectedValue(new Error('broken image preprocessing'));
+
+      const result = await modelRunner.runImageClassificationDetailed(imageData);
+
+      expect(result.status).toBe('degraded_runtime_failure');
+      expect(result.predictions).toEqual([]);
+      expect(result.reason).toContain('broken image preprocessing');
+      await expect(modelRunner.runImageClassification(imageData)).resolves.toEqual([]);
+    });
+
+    it('should report degraded audio runtime failures instead of throwing', async () => {
+      const audioData: AudioData = {
+        samples: new Float32Array([0.1, 0.2, 0.3]),
+        sampleRate: 16000,
+        duration: 1000,
+      };
+
+      (modelRunner as any).audioModel = { run: jest.fn() };
+      (modelRunner as any).preprocessAudio = jest.fn().mockRejectedValue(new Error('broken audio preprocessing'));
+
+      const result = await modelRunner.runAudioClassificationDetailed(audioData);
+
+      expect(result.status).toBe('degraded_runtime_failure');
+      expect(result.predictions).toEqual([]);
+      expect(result.reason).toContain('broken audio preprocessing');
+      await expect(modelRunner.runAudioClassification(audioData)).resolves.toEqual([]);
+    });
   });
 });

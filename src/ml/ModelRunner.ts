@@ -123,7 +123,8 @@ export interface AudioData {
 export type ModelRunStatus =
   | 'ok'
   | 'degraded_invalid_input'
-  | 'degraded_empty_output';
+  | 'degraded_empty_output'
+  | 'degraded_runtime_failure';
 
 export interface ModelRunResult {
   modality: 'image' | 'audio';
@@ -228,14 +229,17 @@ export class ModelRunner {
         'Image input validation failed'
       );
     }
-    
-    await this.loadImageModel();
-    
-    if (!this.imageModel) {
-      throw new Error('Image model not loaded');
-    }
-
     try {
+      await this.loadImageModel();
+
+      if (!this.imageModel) {
+        return this.createDegradedResult(
+          'image',
+          'degraded_runtime_failure',
+          'Image model did not finish loading'
+        );
+      }
+
       console.log('Running image classification...');
       
       // Preprocess the image
@@ -265,7 +269,11 @@ export class ModelRunner {
       };
     } catch (error) {
       console.error('Image classification failed:', error);
-      throw new Error(`Image classification failed: ${error instanceof Error ? error.message : String(error)}`);
+      return this.createDegradedResult(
+        'image',
+        'degraded_runtime_failure',
+        `Image classification failed: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -287,14 +295,17 @@ export class ModelRunner {
         'Audio input validation failed'
       );
     }
-    
-    await this.loadAudioModel();
-    
-    if (!this.audioModel) {
-      throw new Error('Audio model not loaded');
-    }
-
     try {
+      await this.loadAudioModel();
+
+      if (!this.audioModel) {
+        return this.createDegradedResult(
+          'audio',
+          'degraded_runtime_failure',
+          'Audio model did not finish loading'
+        );
+      }
+
       console.log('Running audio classification...');
       
       // Preprocess the audio
@@ -324,7 +335,11 @@ export class ModelRunner {
       };
     } catch (error) {
       console.error('Audio classification failed:', error);
-      throw new Error(`Audio classification failed: ${error instanceof Error ? error.message : String(error)}`);
+      return this.createDegradedResult(
+        'audio',
+        'degraded_runtime_failure',
+        `Audio classification failed: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -626,7 +641,7 @@ export class ModelRunner {
 
   private createDegradedResult(
     modality: 'image' | 'audio',
-    status: Extract<ModelRunStatus, 'degraded_invalid_input' | 'degraded_empty_output'>,
+    status: Exclude<ModelRunStatus, 'ok'>,
     reason: string
   ): ModelRunResult {
     console.warn(`[ModelRunner] ${modality} inference degraded: ${reason}`);

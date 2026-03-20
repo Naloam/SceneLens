@@ -405,7 +405,8 @@ export interface Prediction {
 
 export type TriggeredDegradationReason =
   | 'degraded_invalid_input'
-  | 'degraded_empty_output';
+  | 'degraded_empty_output'
+  | 'degraded_runtime_failure';
 
 export interface TriggeredDegradation {
   source: 'image' | 'audio';
