@@ -1255,3 +1255,66 @@ This round:
 - phase status
   - phase 6 code-side closure is now locally closed
   - remaining verification still belongs to the later end-to-end real-device batch, per current project instruction
+
+## 2026-03-20 continued: OPPO device debug closure pass (truthfulness and compatibility follow-up)
+- device facts collected from the connected OPPO `PJT110`
+  - installed packages relevant to this round include:
+    - `com.eg.android.AlipayGphone`
+    - `com.coloros.calendar`
+    - `com.ss.android.lark`
+    - `com.tencent.wemeet.app`
+    - `com.heytap.smarthome`
+    - `com.autonavi.minimap`
+    - `com.sankuai.meituan`
+  - `adb shell am start -W -a android.intent.action.VIEW -d "alipays://platformapi/startapp?appId=200011235" com.eg.android.AlipayGphone`
+    - resolves and launches successfully on this device
+  - `lark://` / `feishu://` do not resolve as plain package-scoped implicit intents on this device
+    - explicit router activity launch works
+    - this means the previous deep-link shape was too optimistic for some apps
+  - `content://com.android.calendar/events` does not resolve to the OPPO calendar app
+    - plain `ACTION_VIEW` without package falls into Android resolver / unrelated handlers
+  - native calendar signal logs showed:
+    - `Unknown URL content://com.android.calendar/instances/when`
+    - root cause: the code was querying the `Instances` root URI without appending the required time-range path
+  - export is real on-device, not just a toast
+    - `adb shell run-as com.che1sy.scenelens ls files` showed:
+      - `scenelens-export-20260320-201922.json`
+      - `scenelens-export-20260320-201924.json`
+- fixes implemented in this pass
+  - `LocationConfigScreen`
+    - when shared map text fails to parse, manual input no longer auto-fills the current signal-based location
+    - this removes the false impression that imported coordinates were replaced by the phone's current location
+  - `HomeScreen`
+    - returning to the home screen now auto-runs `detectScene()` when the visible scene is still `UNKNOWN`
+    - this closes the most obvious "must pull-to-refresh manually" gap on re-entry
+  - `SceneBridgeModule.openAppWithDeepLink()`
+    - deep-link intents now include `CATEGORY_BROWSABLE`
+    - if package-scoped implicit resolution fails, native code now searches matching activities in the target package and retries with an explicit component
+  - `SceneBridgeModule.validateDeepLink()`
+    - validation now also uses `CATEGORY_BROWSABLE` and query-based checks
+  - `SceneBridgeModule.getUpcomingEvents()`
+    - fixed `CalendarContract.Instances` query construction by appending the required start/end path
+    - added fallback query to `CalendarContract.Events`
+    - this is a real bug fix, not just wording cleanup
+  - `SceneSuggestionManager.resolveIntent()` and `SceneExecutor.resolveIntent()`
+    - fallback candidates now prefer actually installed packages instead of blindly returning stale defaults
+    - added practical compatibility candidates for:
+      - OPPO calendar
+      - OPPO smart home
+      - Tencent Meeting
+      - common travel apps
+- verification after this pass
+  - `npm run typecheck`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --json --outputFile jest-results.json --forceExit`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --detectOpenHandles`
+  - `.\android\gradlew.bat -p android :app:compileDebugKotlin`
+  - all passed locally after the changes
+- remaining truthfulness notes after this pass
+  - `COMMUTE.transit_qr`
+    - device fact still supports "opens target page / user continues", not full automation
+  - `HOME.smart_home`
+    - package compatibility improved on OPPO, but current semantics remain "open app home only / user continues"
+  - `MEETING.meeting_app`
+    - meeting-app resolution is now less stale, but there is still no proven auto-open-into-meeting path on this device
+  - `TRAVEL.travel_app`
+    - still depends on actually installed ticket / airline apps; if none are installed it should truthfully fail instead of pretending success

@@ -7,6 +7,7 @@ import android.app.ActivityManager
 import android.app.AppOpsManager
 import android.app.NotificationManager
 import android.content.Context
+import android.content.ContentUris
 import android.content.Intent
 import android.content.IntentFilter
 import android.app.PendingIntent
@@ -56,6 +57,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.module.annotations.ReactModule
 import java.io.ByteArrayOutputStream
@@ -1026,13 +1028,27 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
       var intent: Intent? = null
       if (!deepLink.isNullOrBlank()) {
         try {
-          intent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
+          val deepLinkUri = Uri.parse(deepLink)
+          val scopedIntent = Intent(Intent.ACTION_VIEW, deepLinkUri).apply {
             `package` = packageName
+            addCategory(Intent.CATEGORY_BROWSABLE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
           }
-          // 检查是否有应用可以处理这个 intent
-          if (intent.resolveActivity(pm) == null) {
-            intent = null
+          intent = if (scopedIntent.resolveActivity(pm) != null) {
+            scopedIntent
+          } else {
+            val unscopedIntent = Intent(Intent.ACTION_VIEW, deepLinkUri).apply {
+              addCategory(Intent.CATEGORY_BROWSABLE)
+              addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val matchedActivity = pm.queryIntentActivities(unscopedIntent, 0)
+              .firstOrNull { it.activityInfo?.packageName == packageName }
+
+            matchedActivity?.activityInfo?.let { info ->
+              Intent(unscopedIntent).apply {
+                setClassName(info.packageName, info.name)
+              }
+            }
           }
         } catch (e: Exception) {
           System.err.println("Failed to create deep link intent: ${e.message}")
@@ -1078,9 +1094,12 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   @ReactMethod
   fun validateDeepLink(deepLink: String, promise: Promise) {
     try {
-      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink))
+      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
+        addCategory(Intent.CATEGORY_BROWSABLE)
+      }
       val pm = ctx.packageManager
-      promise.resolve(intent.resolveActivity(pm) != null)
+      val canResolve = intent.resolveActivity(pm) != null || pm.queryIntentActivities(intent, 0).isNotEmpty()
+      promise.resolve(canResolve)
     } catch (t: Throwable) {
       promise.reject("ERR_VALIDATE", t)
     }
@@ -1100,46 +1119,86 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
 
       // Try to query calendar instances, with fallback to events table
       var cursor: android.database.Cursor? = null
+      val list = Arguments.createArray()
       try {
-        val uri = CalendarContract.Instances.CONTENT_URI
+        val instancesUriBuilder = CalendarContract.Instances.CONTENT_URI.buildUpon()
+        ContentUris.appendId(instancesUriBuilder, now.timeInMillis)
+        ContentUris.appendId(instancesUriBuilder, end.timeInMillis)
+        val uri = instancesUriBuilder.build()
         val projection = arrayOf(
           CalendarContract.Instances.TITLE,
           CalendarContract.Instances.BEGIN,
           CalendarContract.Instances.END,
           CalendarContract.Instances.EVENT_ID,
         )
-        val selection = "${CalendarContract.Instances.BEGIN} >= ? AND ${CalendarContract.Instances.END} <= ?"
-        val args = arrayOf(now.timeInMillis.toString(), end.timeInMillis.toString())
 
         android.util.Log.d("SceneBridge", "Querying calendar with URI: $uri")
 
-        cursor = ctx.contentResolver.query(uri, projection, selection, args, CalendarContract.Instances.BEGIN + " ASC")
-
-        val list = Arguments.createArray()
+        cursor = ctx.contentResolver.query(uri, projection, null, null, CalendarContract.Instances.BEGIN + " ASC")
         cursor?.use {
-          while (it.moveToNext()) {
-            val map = Arguments.createMap().apply {
-              putString("title", it.getString(0))
-              putDouble("begin", it.getLong(1).toDouble())
-              putDouble("end", it.getLong(2).toDouble())
-              putDouble("eventId", it.getLong(3).toDouble())
-            }
-            list.pushMap(map)
-          }
+          appendCalendarEvents(it, list)
         }
-
-        android.util.Log.d("SceneBridge", "Found ${list.size()} calendar events in next $hours hours")
-        promise.resolve(list)
       } catch (e: Exception) {
-        android.util.Log.e("SceneBridge", "Calendar query failed: ${e.message}. Calendar provider may not be available on this device.", e)
-        // Return empty array instead of rejecting, to allow graceful degradation
-        promise.resolve(Arguments.createArray())
+        android.util.Log.w("SceneBridge", "Calendar instances query failed, trying events fallback: ${e.message}", e)
       } finally {
         cursor?.close()
+        cursor = null
       }
+
+      if (list.size() == 0) {
+        try {
+          val fallbackProjection = arrayOf(
+            CalendarContract.Events.TITLE,
+            CalendarContract.Events.DTSTART,
+            CalendarContract.Events.DTEND,
+            CalendarContract.Events._ID,
+          )
+          val fallbackSelection =
+            "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?"
+          val fallbackArgs = arrayOf(now.timeInMillis.toString(), end.timeInMillis.toString())
+
+          android.util.Log.d("SceneBridge", "Falling back to calendar events table")
+
+          cursor = ctx.contentResolver.query(
+            CalendarContract.Events.CONTENT_URI,
+            fallbackProjection,
+            fallbackSelection,
+            fallbackArgs,
+            CalendarContract.Events.DTSTART + " ASC"
+          )
+          cursor?.use {
+            appendCalendarEvents(it, list)
+          }
+        } catch (e: Exception) {
+          android.util.Log.e(
+            "SceneBridge",
+            "Calendar query failed: ${e.message}. Calendar provider may not be available on this device.",
+            e
+          )
+        } finally {
+          cursor?.close()
+        }
+      }
+
+      android.util.Log.d("SceneBridge", "Found ${list.size()} calendar events in next $hours hours")
+      promise.resolve(list)
     } catch (t: Throwable) {
       android.util.Log.e("SceneBridge", "Unexpected error in getUpcomingEvents", t)
       promise.reject("ERR_CALENDAR", t.message ?: "Unknown error")
+    }
+  }
+
+  private fun appendCalendarEvents(cursor: android.database.Cursor, list: WritableArray) {
+    while (cursor.moveToNext()) {
+      val begin = cursor.getLong(1)
+      val end = cursor.getLong(2)
+      val map = Arguments.createMap().apply {
+        putString("title", cursor.getString(0))
+        putDouble("begin", begin.toDouble())
+        putDouble("end", end.toDouble())
+        putDouble("eventId", cursor.getLong(3).toDouble())
+      }
+      list.pushMap(map)
     }
   }
 

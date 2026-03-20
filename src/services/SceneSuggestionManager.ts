@@ -861,17 +861,41 @@ class SceneSuggestionManagerClass {
       console.warn('[SceneSuggestionManager] AppDiscoveryEngine resolve failed, fallback to defaults', error);
     }
 
-    // 使用 fallback 包名映射
-    const fallbackMap: Record<string, string> = {
-      TRANSIT_APP_TOP1: 'com.eg.android.AlipayGphone',
-      MUSIC_PLAYER_TOP1: 'com.netease.cloudmusic',
-      CALENDAR_TOP1: 'com.android.calendar',
-      MEETING_APP_TOP1: 'com.ss.android.lark',
-      STUDY_APP_TOP1: 'camp.firefly.foresto',
-      TRAVEL_APP_TOP1: 'com.MobileTicket',
-      SMART_HOME_TOP1: 'com.xiaomi.smarthome',
+    const fallbackCandidates: Record<string, string[]> = {
+      TRANSIT_APP_TOP1: ['com.eg.android.AlipayGphone'],
+      MUSIC_PLAYER_TOP1: ['com.netease.cloudmusic'],
+      CALENDAR_TOP1: ['com.coloros.calendar', 'com.android.calendar', 'com.google.android.calendar'],
+      MEETING_APP_TOP1: [
+        'com.ss.android.lark',
+        'com.tencent.wemeet.app',
+        'com.alibaba.android.rimet',
+        'com.tencent.wework',
+      ],
+      STUDY_APP_TOP1: ['camp.firefly.foresto'],
+      TRAVEL_APP_TOP1: [
+        'com.MobileTicket',
+        'ctrip.android.view',
+        'com.Qunar',
+        'com.cares.airtravelphone',
+      ],
+      SMART_HOME_TOP1: ['com.heytap.smarthome', 'com.xiaomi.smarthome', 'com.tuya.smart'],
     };
-    return fallbackMap[intent] || null;
+    const candidates = fallbackCandidates[intent];
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    for (const packageName of candidates) {
+      try {
+        if (await SceneBridge.isAppInstalled(packageName)) {
+          return packageName;
+        }
+      } catch (error) {
+        console.warn(`[SceneSuggestionManager] Failed to check app install state for ${packageName}:`, error);
+      }
+    }
+
+    return candidates[0] ?? null;
   }
 
   /**

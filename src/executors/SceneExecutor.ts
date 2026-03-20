@@ -332,26 +332,51 @@ export class SceneExecutor {
       console.warn('AppDiscoveryEngine resolve failed, fallback to defaults', error);
     }
 
-    const fallbackMap: Record<string, string> = {
-      TRANSIT_APP_TOP1: 'com.eg.android.AlipayGphone',
-      MUSIC_PLAYER_TOP1: 'com.netease.cloudmusic',
-      CALENDAR_TOP1: 'com.android.calendar',
-      MEETING_APP_TOP1: 'com.ss.android.lark',
-      STUDY_APP_TOP1: 'com.chaoxing.mobile', // 学习通
-      STUDY_APP_TOP2: 'com.netease.edu.ucmooc', // 中国大学MOOC
-      STUDY_APP_TOP3: 'camp.firefly.foresto', // Forest
-      STUDY_APP_TOP4: 'com.fenbi.android.solar', // 猿题库
-      STUDY_APP_TOP5: 'com.zhihu.android', // 知乎
-      TRAVEL_APP_TOP1: 'com.MobileTicket',
-      SMART_HOME_TOP1: 'com.xiaomi.smarthome',
-      PAYMENT_APP_TOP1: 'com.eg.android.AlipayGphone',
-      MAP_APP_TOP1: 'com.autonavi.minimap', // 高德地图
-      MAP_APP_TOP2: 'com.baidu.BaiduMap', // 百度地图
-      RIDE_SHARE_APP_TOP1: 'com.sdu.didi.psnger', // 滴滴出行
-      SOCIAL_APP_TOP1: 'com.tencent.mm', // 微信
-      SOCIAL_APP_TOP2: 'com.tencent.mobileqq', // QQ
+    const fallbackCandidates: Record<string, string[]> = {
+      TRANSIT_APP_TOP1: ['com.eg.android.AlipayGphone'],
+      MUSIC_PLAYER_TOP1: ['com.netease.cloudmusic'],
+      CALENDAR_TOP1: ['com.coloros.calendar', 'com.android.calendar', 'com.google.android.calendar'],
+      MEETING_APP_TOP1: [
+        'com.ss.android.lark',
+        'com.tencent.wemeet.app',
+        'com.alibaba.android.rimet',
+        'com.tencent.wework',
+      ],
+      STUDY_APP_TOP1: ['com.chaoxing.mobile'], // 学习通
+      STUDY_APP_TOP2: ['com.netease.edu.ucmooc'], // 中国大学MOOC
+      STUDY_APP_TOP3: ['camp.firefly.foresto'], // Forest
+      STUDY_APP_TOP4: ['com.fenbi.android.solar'], // 猿题库
+      STUDY_APP_TOP5: ['com.zhihu.android'], // 知乎
+      TRAVEL_APP_TOP1: [
+        'com.MobileTicket',
+        'ctrip.android.view',
+        'com.Qunar',
+        'com.cares.airtravelphone',
+      ],
+      SMART_HOME_TOP1: ['com.heytap.smarthome', 'com.xiaomi.smarthome', 'com.tuya.smart'],
+      PAYMENT_APP_TOP1: ['com.eg.android.AlipayGphone'],
+      MAP_APP_TOP1: ['com.autonavi.minimap'], // 高德地图
+      MAP_APP_TOP2: ['com.baidu.BaiduMap'], // 百度地图
+      RIDE_SHARE_APP_TOP1: ['com.sdu.didi.psnger'], // 滴滴出行
+      SOCIAL_APP_TOP1: ['com.tencent.mm'], // 微信
+      SOCIAL_APP_TOP2: ['com.tencent.mobileqq'], // QQ
     };
-    return fallbackMap[intent] || null;
+    const candidates = fallbackCandidates[intent];
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    for (const packageName of candidates) {
+      try {
+        if (await SceneBridge.isAppInstalled(packageName)) {
+          return packageName;
+        }
+      } catch (error) {
+        console.warn(`Failed to check app install state for ${packageName}:`, error);
+      }
+    }
+
+    return candidates[0] ?? null;
   }
 
   /**

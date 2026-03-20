@@ -372,6 +372,7 @@ export const LocationConfigScreen: React.FC = () => {
     importedCoordinates?: { latitude: number; longitude: number },
     importedText?: string
   ) => {
+    const hasImportedText = Boolean(importedText?.trim());
     setSelectedTab(type);
     const config = fenceConfigs[type];
     setSelectedTab(type);
@@ -385,6 +386,10 @@ export const LocationConfigScreen: React.FC = () => {
     if (importedCoordinates) {
       setManualLatitude(importedCoordinates.latitude.toFixed(6));
       setManualLongitude(importedCoordinates.longitude.toFixed(6));
+    } else if (hasImportedText) {
+      // 共享文本未解析成功时不要偷偷回填“当前位置”，否则会制造导入成功的错觉。
+      setManualLatitude('');
+      setManualLongitude('');
     } else if (config.fence) {
       setManualLatitude(config.fence.latitude.toFixed(6));
       setManualLongitude(config.fence.longitude.toFixed(6));

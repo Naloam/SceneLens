@@ -187,7 +187,10 @@ export const HomeScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       void loadBackgroundRuntimeStatus();
-    }, [loadBackgroundRuntimeStatus])
+      if (!currentContext || currentContext.context === 'UNKNOWN') {
+        void detectScene();
+      }
+    }, [currentContext, detectScene, loadBackgroundRuntimeStatus])
   );
 
   useEffect(() => {
