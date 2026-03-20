@@ -17,6 +17,7 @@ import type {
 import { SystemSettingsController } from '../../automation/SystemSettingsController';
 import { AppLaunchController } from '../../automation/AppLaunchController';
 import { notificationManager } from '../../notifications/NotificationManager';
+import { quickActionManager } from '../../quickactions/QuickActionManager';
 
 // ==================== 存储键 ====================
 
@@ -416,7 +417,7 @@ export class RuleExecutor {
     for (const action of rule.actions) {
       const actionStart = Date.now();
       try {
-        await this.executeAction(action);
+        await this.executeAction(action, context);
         result.executedActions.push({
           action,
           success: true,
@@ -444,7 +445,7 @@ export class RuleExecutor {
   /**
    * 执行单个动作
    */
-  private async executeAction(action: AutomationAction): Promise<void> {
+  private async executeAction(action: AutomationAction, context: ExecutionContext): Promise<void> {
     switch (action.type) {
       case 'system_setting':
         await this.executeSystemSettingAction(action.params);
@@ -459,7 +460,7 @@ export class RuleExecutor {
         break;
       
       case 'quick_action':
-        await this.executeQuickAction(action.params);
+        await this.executeQuickAction(action.params, context);
         break;
       
       default:
@@ -596,7 +597,7 @@ export class RuleExecutor {
   /**
    * 执行快捷操作动作
    */
-  private async executeQuickAction(params: Record<string, unknown>): Promise<void> {
+  private async executeQuickAction(params: Record<string, unknown>, context: ExecutionContext): Promise<void> {
     const { actionId } = params as { actionId?: string };
     
     if (!actionId) {
@@ -604,7 +605,10 @@ export class RuleExecutor {
     }
 
     // TODO: 集成 QuickActionManager
-    console.log(`[RuleExecutor] Would execute quick action: ${actionId}`);
+    const result = await quickActionManager.executeActionDetailed(actionId, context.sceneType);
+    if (!result.success) {
+      throw new Error(result.error ?? `Quick action failed: ${actionId}`);
+    }
   }
 
   /**

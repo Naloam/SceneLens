@@ -102,19 +102,7 @@ export const SceneSuggestionCard: React.FC<SceneSuggestionCardProps> = ({
         }
       );
 
-      // 计算实际成功的操作数量
-      const successCount = result.executedActions.filter(a => a.success).length;
-      const totalAttempted = result.executedActions.length;
-      const totalActions = totalAttempted + result.skippedActions.length;
-
-      // 显示执行结果通知
-      await notificationManager.showSuggestionExecutionResult(
-        scenePackage,
-        result.success,
-        successCount,
-        totalActions,
-        result.skippedActions.length
-      );
+      await notificationManager.showSuggestionExecutionResult(scenePackage, result);
 
       // 如果应用了降级策略，显示降级说明
       if (result.fallbackApplied && !hideFallbackNotes) {

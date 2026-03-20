@@ -357,13 +357,22 @@ export interface QuickAction {
   priority?: number;  // 1-10, 优先级
 }
 
+export type QuickActionExecutionStatus =
+  | 'success'
+  | 'action_not_found'
+  | 'action_disabled'
+  | 'permission_required'
+  | 'execution_failed';
+
 /**
  * 快捷操作执行结果
  */
 export interface QuickActionResult {
   success: boolean;
   actionId: string;
+  status: QuickActionExecutionStatus;
   error?: string;
+  permission?: string;
   duration: number;
   timestamp: number;
 }

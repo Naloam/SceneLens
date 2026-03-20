@@ -4,9 +4,11 @@ import type {
   SceneType,
   Action,
   SceneSuggestionPackage,
+  SuggestionExecutionResult,
   OneTapAction,
   OneTapActionKind,
 } from '../types';
+import { buildSuggestionExecutionFeedback } from '../utils/suggestionExecution';
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
@@ -682,38 +684,25 @@ class NotificationManagerClass {
    */
   async showSuggestionExecutionResult(
     scenePackage: SceneSuggestionPackage,
-    success: boolean,
-    executedCount: number,
-    totalCount: number,
-    skippedCount: number
+    result: SuggestionExecutionResult
   ): Promise<string | null> {
     if (!(await this.ensureInitialized())) {
       return null;
     }
 
     try {
-      const title = success ? '✅ 场景执行成功' : '⚠️ 场景部分执行失败';
-
-      let body = `${scenePackage.displayName}：`;
-      if (success && skippedCount === 0) {
-        body += `已完成 ${executedCount} 项操作`;
-      } else if (success) {
-        body += `已完成 ${executedCount} 项，跳过 ${skippedCount} 项`;
-      } else {
-        body += `${executedCount}/${totalCount} 项操作成功`;
-      }
+      const feedback = buildSuggestionExecutionFeedback(scenePackage.displayName, result);
 
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
-          title,
-          body,
+          title: feedback.title,
+          body: feedback.body,
           data: {
             type: 'suggestion_execution_result',
             sceneId: scenePackage.sceneId,
-            success,
-            executedCount,
-            totalCount,
-            skippedCount,
+            success: result.success,
+            status: result.status,
+            summary: result.summary,
             timestamp: Date.now(),
           },
           categoryIdentifier: 'scene_execution',

@@ -8,7 +8,12 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { SceneType } from '../types';
-import type { QuickAction, ActionCategory } from '../types/automation';
+import type {
+  QuickAction,
+  ActionCategory,
+  QuickActionResult,
+  QuickActionExecutionStatus,
+} from '../types/automation';
 import { SystemSettingsController } from '../automation/SystemSettingsController';
 import { AppLaunchController } from '../automation/AppLaunchController';
 import { preferenceManager } from '../learning/PreferenceManager';
@@ -250,32 +255,47 @@ export class QuickActionManager {
    * 执行快捷操作
    */
   async executeAction(actionId: string, currentScene?: SceneType): Promise<boolean> {
+    const result = await this.executeActionDetailed(actionId, currentScene);
+    return result.success;
+  }
+
+  async executeActionDetailed(actionId: string, currentScene?: SceneType): Promise<QuickActionResult> {
     await this.initialize();
+    const startTime = Date.now();
 
     const action = this.actions.get(actionId);
     if (!action) {
       console.error('[QuickActionManager] Action not found:', actionId);
-      return false;
+      return this.buildResult(actionId, startTime, false, 'action_not_found', `Quick action not found: ${actionId}`);
     }
 
     if (!action.enabled) {
       console.warn('[QuickActionManager] Action is disabled:', actionId);
-      return false;
+      return this.buildResult(actionId, startTime, false, 'action_disabled', `Quick action is disabled: ${actionId}`);
     }
 
     console.log('[QuickActionManager] Executing action:', action.name);
 
+    const permissionCheck = await this.checkActionPermissions(action);
+    if (!permissionCheck.success) {
+      return this.buildResult(
+        actionId,
+        startTime,
+        false,
+        'permission_required',
+        permissionCheck.error ?? 'Permission required',
+        permissionCheck.permission
+      );
+    }
+
     try {
-      // 执行动作
       await this.performAction(action);
-
-      // 更新使用统计
       this.updateUsageStats(actionId, currentScene);
-
-      return true;
+      return this.buildResult(actionId, startTime, true, 'success');
     } catch (error) {
       console.error('[QuickActionManager] Failed to execute action:', error);
-      return false;
+      const message = error instanceof Error ? error.message : String(error);
+      return this.buildResult(actionId, startTime, false, 'execution_failed', message);
     }
   }
 
@@ -313,35 +333,65 @@ export class QuickActionManager {
     switch (setting) {
       case 'volume':
         if (typeof value === 'object') {
-          await SystemSettingsController.setVolumes(value as Record<string, number>);
+          const success = await SystemSettingsController.setVolumes(value as Record<string, number>);
+          if (!success) {
+            throw new Error('Failed to update volume');
+          }
         }
         break;
       
       case 'brightness':
         if (typeof value === 'number') {
-          await SystemSettingsController.setBrightness(value);
+          const success = await SystemSettingsController.setBrightness(value);
+          if (!success) {
+            throw new Error('Failed to update brightness');
+          }
         }
         break;
       
       case 'doNotDisturb':
         if (typeof value === 'boolean') {
-          await SystemSettingsController.setDoNotDisturb(value);
+          const success = await SystemSettingsController.setDoNotDisturb(value);
+          if (!success) {
+            throw new Error('Failed to update do not disturb');
+          }
         } else if (typeof value === 'string') {
-          await SystemSettingsController.setDoNotDisturb(true, value as 'priority' | 'alarms' | 'none');
+          const success = await SystemSettingsController.setDoNotDisturb(true, value as 'priority' | 'alarms' | 'none');
+          if (!success) {
+            throw new Error('Failed to update do not disturb');
+          }
         }
         break;
       
       case 'wifi':
         if (typeof value === 'boolean') {
-          await SystemSettingsController.setWiFi(value);
+          const result = await SystemSettingsController.setWiFi(value);
+          if (!result.success) {
+            throw new Error(result.error ?? 'Failed to update WiFi');
+          }
         }
         break;
       
       case 'bluetooth':
         if (typeof value === 'boolean') {
-          await SystemSettingsController.setBluetooth(value);
+          const result = await SystemSettingsController.setBluetooth(value);
+          if (!result.success) {
+            throw new Error(result.error ?? 'Failed to update Bluetooth');
+          }
         }
         break;
+
+      case 'screenTimeout':
+        if (typeof value === 'number') {
+          const success = await SystemSettingsController.setScreenTimeout(value);
+          if (!success) {
+            throw new Error('Failed to update screen timeout');
+          }
+        }
+        break;
+
+      default:
+        throw new Error(`Unknown system setting action: ${String(setting)}`);
     }
   }
 
@@ -353,9 +403,15 @@ export class QuickActionManager {
     }
 
     if (deepLink && typeof deepLink === 'string') {
-      await AppLaunchController.launchAppWithDeepLink(packageName, deepLink);
+      const success = await AppLaunchController.launchAppWithDeepLink(packageName, deepLink);
+      if (!success) {
+        throw new Error(`Failed to launch app with deep link: ${packageName}`);
+      }
     } else {
-      await AppLaunchController.launchApp(packageName);
+      const success = await AppLaunchController.launchApp(packageName);
+      if (!success) {
+        throw new Error(`Failed to launch app: ${packageName}`);
+      }
     }
   }
 
@@ -366,11 +422,20 @@ export class QuickActionManager {
     const finalUri = await this.buildNavigationUri(shortcutId as string, uri as string);
     
     if (finalUri) {
-      await AppLaunchController.openDeepLink(finalUri);
+      const success = await AppLaunchController.openDeepLink(finalUri);
+      if (!success) {
+        throw new Error(`Failed to open deep link: ${finalUri}`);
+      }
     } else if (shortcutId && typeof shortcutId === 'string') {
-      await AppLaunchController.launchShortcut(shortcutId);
+      const success = await AppLaunchController.launchShortcut(shortcutId);
+      if (!success) {
+        throw new Error(`Failed to launch shortcut: ${shortcutId}`);
+      }
     } else if (uri && typeof uri === 'string') {
-      await AppLaunchController.openDeepLink(uri);
+      const success = await AppLaunchController.openDeepLink(uri);
+      if (!success) {
+        throw new Error(`Failed to open deep link: ${uri}`);
+      }
     } else {
       throw new Error('Shortcut ID or URI is required');
     }
@@ -611,6 +676,131 @@ export class QuickActionManager {
   async setSortOrder(order: 'usage' | 'recent' | 'alphabetical'): Promise<void> {
     this.preferences.sortOrder = order;
     await this.savePreferences();
+  }
+
+  private buildResult(
+    actionId: string,
+    startTime: number,
+    success: boolean,
+    status: QuickActionExecutionStatus,
+    error?: string,
+    permission?: string
+  ): QuickActionResult {
+    return {
+      success,
+      actionId,
+      status,
+      error,
+      permission,
+      duration: Date.now() - startTime,
+      timestamp: Date.now(),
+    };
+  }
+
+  private async checkActionPermissions(action: QuickAction): Promise<{
+    success: boolean;
+    permission?: string;
+    error?: string;
+  }> {
+    if (action.actionType === 'system_setting') {
+      return this.checkSystemSettingPermissions(action.actionParams);
+    }
+
+    if (action.actionType === 'composite') {
+      const steps = action.actionParams.steps;
+      if (Array.isArray(steps)) {
+        for (const step of steps) {
+          const typedStep = step as { type?: string; params?: Record<string, unknown> };
+          if (typedStep.type === 'system_setting' && typedStep.params) {
+            const result = await this.checkSystemSettingPermissions(typedStep.params);
+            if (!result.success) {
+              return result;
+            }
+          }
+        }
+      }
+    }
+
+    return { success: true };
+  }
+
+  private async checkSystemSettingPermissions(params: Record<string, unknown>): Promise<{
+    success: boolean;
+    permission?: string;
+    error?: string;
+  }> {
+    const explicitPermissions = this.normalizePermissionList(
+      params.requiredPermissions ?? params.requiredPermission
+    );
+
+    for (const permission of explicitPermissions) {
+      const permitted = await this.checkNamedPermission(permission);
+      if (!permitted) {
+        return {
+          success: false,
+          permission,
+          error: `Permission required: ${permission}`,
+        };
+      }
+    }
+
+    const setting = params.setting;
+    if (typeof setting !== 'string') {
+      return { success: true };
+    }
+
+    switch (setting) {
+      case 'brightness':
+      case 'screenTimeout': {
+        const granted = await SystemSettingsController.checkWriteSettingsPermission();
+        return granted
+          ? { success: true }
+          : { success: false, permission: 'write_settings', error: 'Permission required: write_settings' };
+      }
+      case 'doNotDisturb': {
+        const granted = await SystemSettingsController.checkDoNotDisturbPermission();
+        return granted
+          ? { success: true }
+          : { success: false, permission: 'notification_policy', error: 'Permission required: notification_policy' };
+      }
+      case 'bluetooth': {
+        const granted = await SystemSettingsController.checkBluetoothPermission();
+        return granted
+          ? { success: true }
+          : { success: false, permission: 'bluetooth_connect', error: 'Permission required: bluetooth_connect' };
+      }
+      default:
+        return { success: true };
+    }
+  }
+
+  private normalizePermissionList(rawPermissions: unknown): string[] {
+    if (typeof rawPermissions === 'string') {
+      return [rawPermissions];
+    }
+
+    if (Array.isArray(rawPermissions)) {
+      return rawPermissions.filter((permission): permission is string => typeof permission === 'string');
+    }
+
+    return [];
+  }
+
+  private async checkNamedPermission(permission: string): Promise<boolean> {
+    switch (permission) {
+      case 'write_settings':
+      case 'WRITE_SETTINGS':
+        return SystemSettingsController.checkWriteSettingsPermission();
+      case 'notification_policy':
+      case 'NOTIFICATION_POLICY':
+      case 'dnd':
+        return SystemSettingsController.checkDoNotDisturbPermission();
+      case 'bluetooth_connect':
+      case 'BLUETOOTH_CONNECT':
+        return SystemSettingsController.checkBluetoothPermission();
+      default:
+        return true;
+    }
   }
 }
 

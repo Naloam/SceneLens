@@ -45,6 +45,7 @@ jest.mock('../../core/SceneBridge', () => {
     getUpcomingEvents: jest.fn(),
     setDoNotDisturb: jest.fn(),
     openAppWithDeepLink: jest.fn(),
+    isAppInstalled: jest.fn(),
     hasLocationPermission: jest.fn(),
     hasUsageStatsPermission: jest.fn(),
     hasCalendarPermission: jest.fn(),
@@ -105,6 +106,7 @@ describe('Meeting Scene Integration', () => {
     (sceneBridge.getUpcomingEvents as jest.Mock).mockResolvedValue([]);
     (sceneBridge.getInstalledApps as jest.Mock).mockResolvedValue([]);
     (sceneBridge.getUsageStats as jest.Mock).mockResolvedValue([]);
+    (sceneBridge.isAppInstalled as jest.Mock).mockResolvedValue(true);
     (sceneBridge.getBatteryStatus as jest.Mock).mockResolvedValue({
       isCharging: false,
       isFull: false,
@@ -309,9 +311,13 @@ describe('Meeting Scene Integration', () => {
 
       expect(results.length).toBe(meetingRule!.actions.length);
 
-      // Only check non-notification actions for success
+      // Only target-page / automated actions count as success
       const appActions = results.filter(r => r.action.target !== 'notification');
-      expect(appActions.every(r => r.success)).toBe(true);
+      const meetingAppAction = results.find(r => r.action.intent === 'MEETING_APP_TOP1');
+      const meaningfulSuccessCount = appActions.filter(r => r.success).length;
+      expect(meaningfulSuccessCount).toBe(appActions.length - 1);
+      expect(meetingAppAction?.success).toBe(false);
+      expect(meetingAppAction?.completionStatus).toBe('opened_app_home');
 
       // Verify specific actions
       const dndAction = results.find(r => r.action.action === 'setDoNotDisturb');
@@ -319,6 +325,7 @@ describe('Meeting Scene Integration', () => {
 
       expect(dndAction?.success).toBe(true);
       expect(calendarAction?.success).toBe(true);
+      expect(calendarAction?.completionStatus).toBe('needs_user_input');
       expect(SystemSettingsController.setDoNotDisturb).toHaveBeenCalled();
 
       console.log('✅ Test 5 passed: Meeting actions executed successfully');
@@ -410,21 +417,25 @@ describe('Meeting Scene Integration', () => {
       const results = await sceneExecutor.execute(meetingRule!.rule.actions);
       const successCount = results.filter(r => r.success).length;
 
-      // Only check non-notification actions for success
+      // Only target-page / automated actions count as success
       const appActions = results.filter(r => r.action.target !== 'notification');
       const appSuccessCount = appActions.filter(r => r.success).length;
+      const meetingAppResult = results.find(r => r.action.intent === 'MEETING_APP_TOP1');
+      const calendarResult = results.find(r => r.action.intent === 'CALENDAR_TOP1');
 
-      expect(appSuccessCount).toBe(appActions.length);
+      expect(appSuccessCount).toBe(appActions.length - 1);
       console.log(`   ✓ Actions executed: ${successCount}/${results.length} succeeded`);
 
       // Verify key actions
       const dndResult = results.find(r => r.action.action === 'setDoNotDisturb');
-      const calendarResult = results.find(r => r.action.intent === 'CALENDAR_TOP1');
-      
+
       expect(dndResult?.success).toBe(true);
       expect(calendarResult?.success).toBe(true);
+      expect(calendarResult?.completionStatus).toBe('needs_user_input');
+      expect(meetingAppResult?.success).toBe(false);
+      expect(meetingAppResult?.completionStatus).toBe('opened_app_home');
       expect(SystemSettingsController.setDoNotDisturb).toHaveBeenCalled();
-      
+
       console.log('   ✓ Do Not Disturb enabled');
       console.log('   ✓ Calendar app opened');
 

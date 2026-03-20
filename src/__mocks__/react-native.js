@@ -212,11 +212,21 @@ const Image = {
 };
 
 const Linking = {
+  openURL: jest.fn(() => Promise.resolve()),
+  canOpenURL: jest.fn(() => Promise.resolve(true)),
+  getInitialURL: jest.fn(() => Promise.resolve(null)),
   openSettings: jest.fn(() => Promise.resolve()),
+  sendIntent: jest.fn(() => Promise.resolve()),
 };
 
 const Alert = {
   alert: jest.fn(),
+};
+
+const Share = {
+  share: jest.fn(() => Promise.resolve({ action: 'sharedAction' })),
+  sharedAction: 'sharedAction',
+  dismissedAction: 'dismissedAction',
 };
 
 const PermissionsAndroid = {
@@ -248,5 +258,6 @@ module.exports = {
   Image,
   Linking,
   Alert,
+  Share,
   PermissionsAndroid,
 };

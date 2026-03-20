@@ -29,6 +29,7 @@ import {
   mapOneTapActionKindToProcessorFeedback,
   mapOneTapActionKindToUserFeedback,
 } from '../utils/suggestionFeedback';
+import { buildSuggestionExecutionFeedback } from '../utils/suggestionExecution';
 import SceneSuggestionCard from '../components/ui/SceneSuggestionCard';
 import { QuickActionsPanel } from '../components/quickactions/QuickActionsPanel';
 import sceneBridge, { type BackgroundLocationServiceStatus } from '../core/SceneBridge';
@@ -305,6 +306,10 @@ export const HomeScreen: React.FC = () => {
     console.log('[HomeScreen] Suggestion execution complete:', result);
     const userAction = mapOneTapActionKindToUserFeedback(actionKind, result.success);
     const feedbackType = mapOneTapActionKindToProcessorFeedback(actionKind, result.success);
+    const feedback = buildSuggestionExecutionFeedback(
+      result.sceneId,
+      result
+    );
 
     addToHistory({
       sceneType: result.sceneId,
@@ -315,42 +320,19 @@ export const HomeScreen: React.FC = () => {
     });
 
     predictiveTrigger.recordFeedback(result.sceneId, userAction);
-    
-    // 记录到反馈处理器（Phase 3）
     feedbackProcessor.recordFeedback(
       {
         id: result.sceneId,
         type: 'SCENE_ACTION',
         scene: (result.sceneId as SceneType) || 'UNKNOWN',
         title: '场景建议',
-        content: `执行 ${result.executedActions.length} 项操作`,
+        content: feedback.body,
         confidence: currentContext?.confidence ?? 0.7,
       },
       feedbackType
     );
 
-    const successCount = result.executedActions.filter(a => a.success).length;
-    const totalCount = result.executedActions.length;
-
-    if (result.success && result.fallbackApplied) {
-      Alert.alert(
-        '执行完成',
-        `已完成 ${successCount} 项操作（部分功能已降级）`,
-        [{ text: '确定' }]
-      );
-    } else if (result.success) {
-      Alert.alert(
-        '执行成功',
-        `已完成 ${successCount} 项操作`,
-        [{ text: '确定' }]
-      );
-    } else {
-      Alert.alert(
-        '执行失败',
-        `${successCount}/${totalCount} 项操作成功`,
-        [{ text: '确定' }]
-      );
-    }
+    Alert.alert(feedback.title, feedback.body, [{ text: '确定' }]);
   }, [currentContext, addToHistory]);
 
   /**

@@ -309,7 +309,7 @@ describe('Week 1 Integration Test: Commute Scene E2E', () => {
     // Act: Execute actions
     const results: ExecutionResult[] = await sceneExecutor.execute(commuteRule!.actions);
 
-    // Assert: Verify all actions executed successfully
+    // Assert: Verify execution results reflect real completion semantics
     expect(results.length).toBe(commuteRule!.actions.length);
     
     // Assert: Verify system action (setDoNotDisturb) was called
@@ -326,11 +326,13 @@ describe('Week 1 Integration Test: Commute Scene E2E', () => {
     const transitResult = appResults.find(r => r.action.intent === 'TRANSIT_APP_TOP1');
     expect(transitResult).toBeDefined();
     expect(transitResult?.success).toBe(true);
+    expect(transitResult?.completionStatus).toBe('needs_user_input');
     
-    // Assert: Verify music app was opened
+    // Assert: Verify music action only opens the app shell
     const musicResult = appResults.find(r => r.action.intent === 'MUSIC_PLAYER_TOP1');
     expect(musicResult).toBeDefined();
-    expect(musicResult?.success).toBe(true);
+    expect(musicResult?.success).toBe(false);
+    expect(musicResult?.completionStatus).toBe('opened_app_home');
 
     // Assert: Verify openAppWithDeepLink was called twice
     expect(SceneBridge.openAppWithDeepLink).toHaveBeenCalledTimes(2);
@@ -411,9 +413,13 @@ describe('Week 1 Integration Test: Commute Scene E2E', () => {
     console.log('\n⚡ Step 4: Executing actions...');
     const results = await sceneExecutor.execute(commuteRule.rule.actions);
     
-    // Verify all actions succeeded
+    // Verify execution results reflect real completion semantics
     const successCount = results.filter(r => r.success).length;
-    expect(successCount).toBe(results.length);
+    expect(successCount).toBe(results.length - 1);
+    const transitResult = results.find(r => r.action.intent === 'TRANSIT_APP_TOP1');
+    const musicResult = results.find(r => r.action.intent === 'MUSIC_PLAYER_TOP1');
+    expect(transitResult?.completionStatus).toBe('needs_user_input');
+    expect(musicResult?.completionStatus).toBe('opened_app_home');
     console.log(`   ✓ Actions executed: ${successCount}/${results.length} succeeded`);
 
     // Verify specific actions
@@ -427,12 +433,12 @@ describe('Week 1 Integration Test: Commute Scene E2E', () => {
     console.log('\n✅ Step 5: Showing execution result...');
     await notificationManager.showExecutionResult(
       context.context,
-      true,
+      false,
       '通勤模式已启动：勿扰模式已开启，乘车码和音乐已准备好'
     );
     expect(notificationManager.showExecutionResult).toHaveBeenCalledWith(
       'COMMUTE',
-      true,
+      false,
       expect.any(String)
     );
     console.log(`   ✓ Execution result notification shown`);
@@ -443,7 +449,7 @@ describe('Week 1 Integration Test: Commute Scene E2E', () => {
     console.log(`   - Confidence: ${context.confidence.toFixed(2)}`);
     console.log(`   - Rule: ${commuteRule.rule.id}`);
     console.log(`   - Actions: ${results.length} executed`);
-    console.log(`   - Success rate: 100%`);
+    console.log(`   - Success rate: ${Math.round((successCount / results.length) * 100)}%`);
   });
 
   /**

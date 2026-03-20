@@ -29,8 +29,15 @@ jest.mock('../../../automation/AppLaunchController', () => ({
   },
 }));
 
+jest.mock('../../../quickactions/QuickActionManager', () => ({
+  quickActionManager: {
+    executeActionDetailed: jest.fn(),
+  },
+}));
+
 import { RuleExecutor } from '../RuleExecutor';
 import { notificationManager } from '../../../notifications/NotificationManager';
+import { quickActionManager } from '../../../quickactions/QuickActionManager';
 import type { AutomationRule } from '../../../types/automation';
 import type { SceneType } from '../../../types';
 
@@ -123,5 +130,62 @@ describe('RuleExecutor notification actions', () => {
     );
     expect(result.success).toBe(true);
     expect(result.executedActions[0]?.success).toBe(true);
+  });
+});
+
+describe('RuleExecutor quick actions', () => {
+  let executor: RuleExecutor;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    executor = new RuleExecutor();
+  });
+
+  it('routes quick actions through QuickActionManager with scene context', async () => {
+    const rule = createRule({ actionId: 'wechat_pay' });
+    rule.actions = [
+      {
+        type: 'quick_action',
+        params: { actionId: 'wechat_pay' },
+      },
+    ];
+    (quickActionManager.executeActionDetailed as jest.Mock).mockResolvedValue({
+      success: true,
+      actionId: 'wechat_pay',
+      status: 'success',
+      duration: 12,
+      timestamp: Date.now(),
+    });
+
+    const result = await executor.executeRule(rule, createContext('COMMUTE'));
+
+    expect(quickActionManager.executeActionDetailed).toHaveBeenCalledWith('wechat_pay', 'COMMUTE');
+    expect(result.success).toBe(true);
+    expect(result.executedActions[0]?.success).toBe(true);
+  });
+
+  it('surfaces quick action permission failures in execution results', async () => {
+    const rule = createRule({ actionId: 'brightness_action' });
+    rule.actions = [
+      {
+        type: 'quick_action',
+        params: { actionId: 'brightness_action' },
+      },
+    ];
+    (quickActionManager.executeActionDetailed as jest.Mock).mockResolvedValue({
+      success: false,
+      actionId: 'brightness_action',
+      status: 'permission_required',
+      permission: 'write_settings',
+      error: 'Permission required: write_settings',
+      duration: 8,
+      timestamp: Date.now(),
+    });
+
+    const result = await executor.executeRule(rule, createContext('HOME'));
+
+    expect(result.success).toBe(false);
+    expect(result.executedActions[0]?.success).toBe(false);
+    expect(result.executedActions[0]?.error).toContain('write_settings');
   });
 });

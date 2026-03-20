@@ -77,7 +77,19 @@ jest.mock('../../config/scene-suggestions.json', () => ({
           },
         },
       ],
-      appLaunches: [],
+      appLaunches: [
+        {
+          id: 'smart_home',
+          label: 'Smart Home',
+          description: 'Open smart home app',
+          intent: 'SMART_HOME_TOP1',
+          action: 'launch',
+          params: {
+            mode: 'home',
+          },
+          fallbackAction: 'Open homepage',
+        },
+      ],
       oneTapActions: [
         {
           id: 'welcome',
@@ -116,6 +128,7 @@ jest.mock('../../discovery', () => ({
       const map: Record<string, string> = {
         TRANSIT_APP_TOP1: 'com.eg.android.AlipayGphone',
         MUSIC_PLAYER_TOP1: 'com.netease.cloudmusic',
+        SMART_HOME_TOP1: 'com.xiaomi.smarthome',
       };
       return map[intent] || null;
     }),
@@ -263,8 +276,15 @@ describe('SceneSuggestionManager', () => {
       });
 
       expect(result.success).toBe(true);
+      expect(result.status).toBe('needs_user_input');
       expect(result.sceneId).toBe('COMMUTE');
       expect(result.executedActions).toHaveLength(2);
+      expect(result.summary).toMatchObject({
+        automatedCount: 1,
+        needsUserInputCount: 1,
+        openedAppHomeCount: 0,
+        failedCount: 0,
+      });
       expect(SystemSettingsController.setDoNotDisturb).toHaveBeenCalledWith(true, 'priority');
       expect(sceneBridge.setDoNotDisturb).not.toHaveBeenCalled();
     });
@@ -295,15 +315,18 @@ describe('SceneSuggestionManager', () => {
       });
 
       expect(result.success).toBe(true);
+      expect(result.status).toBe('partial');
       expect(result.fallbackApplied).toBe(true);
       expect(result.executedActions).toHaveLength(2);
       expect(result.executedActions[0]).toMatchObject({
         type: 'system',
         success: false,
+        completionStatus: 'failed',
       });
       expect(result.executedActions[1]).toMatchObject({
         type: 'app',
         success: true,
+        completionStatus: 'needs_user_input',
       });
       expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledTimes(1);
     });
@@ -334,8 +357,21 @@ describe('SceneSuggestionManager', () => {
       });
 
       expect(result.success).toBe(true);
+      expect(result.status).toBe('partial');
       expect(result.fallbackApplied).toBe(true);
       expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledTimes(2);
+      expect(result.executedActions[1]).toMatchObject({
+        type: 'app',
+        success: false,
+        completionStatus: 'opened_app_home',
+        usedFallback: true,
+      });
+      expect(result.summary).toMatchObject({
+        automatedCount: 1,
+        needsUserInputCount: 0,
+        openedAppHomeCount: 1,
+        failedCount: 0,
+      });
       expect(sceneBridge.openAppWithDeepLink).toHaveBeenNthCalledWith(
         1,
         'com.eg.android.AlipayGphone',
@@ -347,12 +383,36 @@ describe('SceneSuggestionManager', () => {
       );
     });
 
+    it('marks no-deeplink app launches as opened_app_home instead of full success', async () => {
+      const result = await manager.executeSuggestion('HOME', 'welcome', {
+        autoFallback: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.status).toBe('partial');
+      expect(result.fallbackApplied).toBe(true);
+      expect(result.summary).toMatchObject({
+        automatedCount: 1,
+        needsUserInputCount: 0,
+        openedAppHomeCount: 1,
+        failedCount: 0,
+      });
+      expect(result.executedActions[1]).toMatchObject({
+        type: 'app',
+        success: false,
+        completionStatus: 'opened_app_home',
+        usedFallback: true,
+      });
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledWith('com.xiaomi.smarthome');
+    });
+
     it('handles dismiss and invalid selections', async () => {
       const dismissed = await manager.executeSuggestion('COMMUTE', 'skip');
       const missingAction = await manager.executeSuggestion('COMMUTE', 'missing');
       const missingScene = await manager.executeSuggestion('UNKNOWN' as SceneType, 'execute');
 
       expect(dismissed.success).toBe(true);
+      expect(dismissed.status).toBe('dismissed');
       expect(dismissed.skippedActions).toContain('all');
       expect(missingAction.success).toBe(false);
       expect(missingScene.success).toBe(false);

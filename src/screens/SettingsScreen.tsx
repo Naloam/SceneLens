@@ -45,6 +45,13 @@ import {
   shouldShowBackgroundRuntimeAlert,
   type BackgroundRuntimeRepairPlan,
 } from './homeRuntimeAlert';
+import {
+  APP_VERSION,
+  PRIVACY_POLICY_TEXT,
+  SCENELENS_REPO_URL,
+  buildFeedbackIssueUrl,
+  exportDataWithBestEffortShare,
+} from '../utils/settingsSupport';
 
 /**
  * 颜色选择器组件
@@ -644,17 +651,14 @@ export const SettingsScreen: React.FC = () => {
     setIsExporting(true);
     try {
       const data = await exportData();
+      const result = await exportDataWithBestEffortShare(data);
 
-      // 在实际应用中，可以使用 expo-file-system 和 expo-sharing
-      // 这里简化处理
-      Alert.alert(
-        '导出数据',
-        '数据已准备就绪（JSON 格式）\n\n在实际应用中，这里会保存为文件并提供分享选项。',
-        [{ text: '确定', onPress: () => {} }]
-      );
+      const message =
+        result.shareState === 'share_sheet_opened'
+          ? `JSON 文件已导出到应用文档目录，并已拉起系统分享面板。\n\n文件名：${result.fileName}\n路径：${result.fileUri}\n\n是否真正发送成功，取决于您在分享面板中的后续操作。`
+          : `JSON 文件已导出到应用文档目录，但当前未能拉起可用的分享面板。\n\n文件名：${result.fileName}\n路径：${result.fileUri}\n\n请稍后从系统文件管理器中继续分享该文件。`;
 
-      // TODO: 安装 expo-sharing 后可以启用完整的导出功能
-      // npm install expo-sharing
+      Alert.alert('导出数据', message, [{ text: '确定', onPress: () => {} }]);
     } catch (error) {
       Alert.alert('导出失败', `无法导出数据：${(error as Error).message}`);
     } finally {
@@ -701,15 +705,17 @@ export const SettingsScreen: React.FC = () => {
    * 打开隐私政策
    */
   const openPrivacyPolicy = () => {
-    // TODO: 替换为实际的隐私政策 URL
-    Alert.alert('隐私政策', '隐私政策将在未来版本中提供');
+    Alert.alert('隐私政策', PRIVACY_POLICY_TEXT, [
+      { text: '关闭', style: 'cancel' },
+      { text: '权限说明', onPress: () => navigation.navigate('PermissionGuide') },
+    ]);
   };
 
   /**
    * 开源源代码仓库
    */
   const openGitHubRepo = () => {
-    Linking.openURL('https://github.com/yourusername/scenelens').catch((err) => {
+    Linking.openURL(SCENELENS_REPO_URL).catch(() => {
       Alert.alert('错误', '无法打开链接');
     });
   };
@@ -718,14 +724,8 @@ export const SettingsScreen: React.FC = () => {
    * 发送反馈
    */
   const sendFeedback = () => {
-    const email = 'feedback@scenelens.app';
-    const subject = 'SceneLens 反馈';
-    const body = '请在此处描述您的意见或建议...';
-
-    Linking.openURL(
-      `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-    ).catch(() => {
-      Alert.alert('错误', '无法打开邮件应用');
+    Linking.openURL(buildFeedbackIssueUrl()).catch(() => {
+      Alert.alert('错误', '无法打开反馈页面');
     });
   };
 
@@ -1234,7 +1234,7 @@ export const SettingsScreen: React.FC = () => {
 
         <List.Item
           title="导出数据"
-          description="将所有数据导出为 JSON 文件"
+          description="导出到应用文档目录，并尝试拉起系统分享"
           left={(props) => <List.Icon {...props} icon="download" />}
           onPress={handleExportData}
           disabled={isExporting}
@@ -1277,7 +1277,7 @@ export const SettingsScreen: React.FC = () => {
 
         <List.Item
           title="版本"
-          description="1.0.0"
+          description={APP_VERSION}
           left={(props) => <List.Icon {...props} icon="information" />}
         />
 
@@ -1285,6 +1285,7 @@ export const SettingsScreen: React.FC = () => {
 
         <List.Item
           title="隐私政策"
+          description="查看本地处理、权限用途与数据清理方式"
           left={(props) => <List.Icon {...props} icon="shield-account" />}
           onPress={openPrivacyPolicy}
         />
@@ -1293,7 +1294,7 @@ export const SettingsScreen: React.FC = () => {
 
         <List.Item
           title="源代码"
-          description="在 GitHub 上查看"
+          description="在 GitHub 上查看 Naloam/SceneLens"
           left={(props) => <List.Icon {...props} icon="github" />}
           onPress={openGitHubRepo}
         />
@@ -1302,7 +1303,7 @@ export const SettingsScreen: React.FC = () => {
 
         <List.Item
           title="发送反馈"
-          description="报告问题或提出建议"
+          description="通过 GitHub Issues 提交问题，并预填版本信息"
           left={(props) => <List.Icon {...props} icon="message-draw" />}
           onPress={sendFeedback}
         />

@@ -208,24 +208,11 @@ describe('场景执行建议包集成测试', () => {
       expect(appActions.length).toBeGreaterThan(0);
 
       // 6. 验证通知被调用
-      const executedCount = result.executedActions.filter(a => a.success).length;
-      const totalCount = result.executedActions.length;
-      const skippedCount = result.skippedActions.length;
-
-      await notificationManager.showSuggestionExecutionResult(
-        suggestion!,
-        result.success,
-        executedCount,
-        totalCount,
-        skippedCount
-      );
+      await notificationManager.showSuggestionExecutionResult(suggestion!, result);
 
       expect(notificationManager.showSuggestionExecutionResult).toHaveBeenCalledWith(
         suggestion,
-        true,
-        executedCount,
-        totalCount,
-        skippedCount
+        result
       );
     });
 
@@ -333,13 +320,18 @@ describe('场景执行建议包集成测试', () => {
       );
 
       // 执行建议
-      const primaryAction = suggestion!.oneTapActions[0];
+      const primaryAction = suggestion!.oneTapActions.find(action => action.type === 'primary');
       const result = await sceneSuggestionManager.executeSuggestion(
         'HOME',
-        primaryAction.id
+        primaryAction!.id,
+        {
+          autoFallback: true,
+        }
       );
 
       expect(result.success).toBe(true);
+      expect(result.status).toBe('partial');
+      expect(result.summary.openedAppHomeCount).toBeGreaterThan(0);
     });
   });
 

@@ -6,6 +6,13 @@ import { deepLinkManager } from '../utils/deepLinkManager';
 import { SystemSettingsController } from '../automation/SystemSettingsController';
 import { resolveDoNotDisturbSettings } from '../automation/systemSettingTransforms';
 import type { VolumeStreamType } from '../types/automation';
+import type { SuggestionActionCompletionStatus } from '../types';
+
+interface ActionExecutionOutcome {
+  success: boolean;
+  completionStatus: SuggestionActionCompletionStatus;
+  error?: string;
+}
 
 /**
  * 执行结果
@@ -13,6 +20,7 @@ import type { VolumeStreamType } from '../types/automation';
 export interface ExecutionResult {
   action: Action;
   success: boolean;
+  completionStatus: SuggestionActionCompletionStatus;
   error?: string;
   duration: number;
 }
@@ -59,16 +67,19 @@ export class SceneExecutor {
     for (const action of actions) {
       const startTime = Date.now();
       try {
-        await this.executeSingle(action);
+        const outcome = await this.executeSingle(action);
         results.push({
           action,
-          success: true,
+          success: outcome.success,
+          completionStatus: outcome.completionStatus,
+          error: outcome.error,
           duration: Date.now() - startTime,
         });
       } catch (error) {
         results.push({
           action,
           success: false,
+          completionStatus: 'failed',
           error: error instanceof Error ? error.message : String(error),
           duration: Date.now() - startTime,
         });
@@ -81,7 +92,7 @@ export class SceneExecutor {
   /**
    * 执行单个动作
    */
-  private async executeSingle(action: Action): Promise<void> {
+  private async executeSingle(action: Action): Promise<ActionExecutionOutcome> {
     switch (action.target) {
       case 'system':
         return this.executeSystemAction(action);
@@ -100,7 +111,7 @@ export class SceneExecutor {
   /**
    * 执行系统动作
    */
-  private async executeSystemAction(action: Action): Promise<void> {
+  private async executeSystemAction(action: Action): Promise<ActionExecutionOutcome> {
     switch (action.action) {
       case 'setDoNotDisturb': {
         const { enabled, mode } = resolveDoNotDisturbSettings(action.params);
@@ -108,7 +119,7 @@ export class SceneExecutor {
         if (!success) {
           throw new Error(`Failed to set do not disturb: enabled=${enabled}, mode=${mode}`);
         }
-        break;
+        return { success: true, completionStatus: 'automated' };
       }
 
       case 'setBrightness': {
@@ -116,7 +127,7 @@ export class SceneExecutor {
         if (!success) {
           throw new Error(`Failed to set brightness: ${action.params?.level ?? 0.5}`);
         }
-        break;
+        return { success: true, completionStatus: 'automated' };
       }
 
       case 'setVolume': {
@@ -125,7 +136,7 @@ export class SceneExecutor {
         if (!success) {
           throw new Error(`Failed to set volume: ${streamType}=${levelPercent}%`);
         }
-        break;
+        return { success: true, completionStatus: 'automated' };
       }
 
       default:
@@ -141,7 +152,7 @@ export class SceneExecutor {
    * 2. 直接打开应用首页（次优）
    * 3. 提示用户手动操作（兜底）
    */
-  private async executeAppAction(action: Action): Promise<void> {
+  private async executeAppAction(action: Action): Promise<ActionExecutionOutcome> {
     // 确保 Deep Link 管理器已初始化
     if (!this.isInitialized) {
       await this.initialize();
@@ -160,23 +171,56 @@ export class SceneExecutor {
     const appAction = this.extractAction(action);
 
     // 使用 Deep Link 管理器打开应用（已内置三级降级策略）
-    const success = await deepLinkManager.openWithDeepLink(
-      packageName,
-      action.deepLink,
-      appAction
-    );
+    const config = deepLinkManager.getConfig(packageName);
+    const candidateUrls: Array<{ url: string; resolvedAction?: string }> = [];
+    const pushCandidate = (url: string | undefined | null) => {
+      if (!url || candidateUrls.some(candidate => candidate.url === url)) {
+        return;
+      }
+      const resolvedAction = config?.deepLinks.find(dl => dl.url === url)?.action;
+      candidateUrls.push({ url, resolvedAction });
+    };
 
-    if (success) {
-      console.log(`[SceneExecutor] Successfully opened app: ${packageName}`);
-      return;
+    pushCandidate(action.deepLink?.trim());
+    const hasExactActionDeepLink = Boolean(
+      appAction && config?.deepLinks.some(dl => dl.action === appAction)
+    );
+    if (hasExactActionDeepLink) {
+      pushCandidate(deepLinkManager.getDeepLink(packageName, appAction));
+    }
+
+    for (const candidate of candidateUrls) {
+      const success = await SceneBridge.openAppWithDeepLink(packageName, candidate.url);
+      if (!success) {
+        continue;
+      }
+
+      const completionStatus = this.classifyAppCompletionStatus(action, candidate.resolvedAction);
+      if (completionStatus === 'opened_app_home') {
+        return {
+          success: false,
+          completionStatus,
+          error: `Opened app home only: ${packageName}`,
+        };
+      }
+
+      console.log(`[SceneExecutor] Opened app target page: ${packageName} (${candidate.resolvedAction ?? action.action})`);
+      return {
+        success: true,
+        completionStatus,
+      };
     }
 
     // 如果 deep link 失败，尝试使用空 deepLink 再次尝试（会触发原生 launcher intent）
     console.warn(`[SceneExecutor] Deep link failed for ${packageName}, trying launch intent`);
     const fallbackSuccess = await SceneBridge.openAppWithDeepLink(packageName, undefined);
     if (fallbackSuccess) {
-      console.log(`[SceneExecutor] Successfully opened app with launch intent: ${packageName}`);
-      return;
+      console.log(`[SceneExecutor] Opened app home with launch intent: ${packageName}`);
+      return {
+        success: false,
+        completionStatus: 'opened_app_home',
+        error: `Opened app home only: ${packageName}`,
+      };
     }
 
     // 兜底：提示用户手动操作
@@ -193,18 +237,25 @@ export class SceneExecutor {
     const actionMap: Record<string, string> = {
       open_ticket_qr: 'open_ticket_qr',
       launch_with_playlist: 'launch_with_playlist',
-      open_calendar: 'open_calendar',
+      open_calendar: 'open_events',
+      open_events: 'open_events',
       open_meeting: 'open_meeting',
-      start_focus: 'start_focus',
+      open_meeting_details: 'open_meeting_details',
+      open_ticket: 'open_ticket_qr',
+      open_orders: 'open_orders',
+      open_map: 'open_map',
+      view_location: 'view_location',
+      launch: 'open_home',
+      start_focus: 'open_focus',
     };
 
-    return actionMap[action.action] ?? 'open_home';
+    return actionMap[action.action] ?? action.action;
   }
 
   /**
    * 执行通知动作
    */
-  private async executeNotification(action: Action): Promise<void> {
+  private async executeNotification(action: Action): Promise<ActionExecutionOutcome> {
     if (action.action === 'suggest') {
       await notificationManager.showSceneSuggestion({
         sceneType: action.params?.sceneType ?? 'COMMUTE',
@@ -213,7 +264,7 @@ export class SceneExecutor {
         actions: [],
         confidence: action.params?.confidence ?? 0.7,
       });
-      return;
+      return { success: true, completionStatus: 'automated' };
     }
     if (action.action === 'execution_result') {
       await notificationManager.showExecutionResult(
@@ -221,12 +272,49 @@ export class SceneExecutor {
         action.params?.success ?? true,
         action.params?.body ?? action.params?.message ?? '执行完成'
       );
-      return;
+      return { success: true, completionStatus: 'automated' };
     }
 
     const title = action.params?.title ?? 'SceneLens 通知';
     const body = action.params?.body ?? `通知动作: ${action.action}`;
     await notificationManager.showSystemNotification(title, body);
+    return { success: true, completionStatus: 'automated' };
+  }
+
+  private classifyAppCompletionStatus(
+    action: Action,
+    resolvedAction?: string
+  ): SuggestionActionCompletionStatus {
+    const launchOnlyActions = new Set(['launch', 'launch_with_playlist']);
+    const targetPageActions = new Set([
+      'open_ticket_qr',
+      'open_ticket',
+      'open_events',
+      'open_calendar',
+      'open_meeting',
+      'open_meeting_details',
+      'open_orders',
+      'open_map',
+      'view_location',
+    ]);
+
+    if (resolvedAction === 'open_home') {
+      return 'opened_app_home';
+    }
+
+    if (launchOnlyActions.has(action.action)) {
+      return 'opened_app_home';
+    }
+
+    if (targetPageActions.has(action.action)) {
+      return 'needs_user_input';
+    }
+
+    if (resolvedAction && targetPageActions.has(resolvedAction)) {
+      return 'needs_user_input';
+    }
+
+    return 'opened_app_home';
   }
 
   /**
@@ -248,7 +336,7 @@ export class SceneExecutor {
       TRANSIT_APP_TOP1: 'com.eg.android.AlipayGphone',
       MUSIC_PLAYER_TOP1: 'com.netease.cloudmusic',
       CALENDAR_TOP1: 'com.android.calendar',
-      MEETING_APP_TOP1: 'com.tencent.wework',
+      MEETING_APP_TOP1: 'com.ss.android.lark',
       STUDY_APP_TOP1: 'com.chaoxing.mobile', // 学习通
       STUDY_APP_TOP2: 'com.netease.edu.ucmooc', // 中国大学MOOC
       STUDY_APP_TOP3: 'camp.firefly.foresto', // Forest

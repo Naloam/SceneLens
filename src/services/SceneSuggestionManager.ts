@@ -12,6 +12,7 @@ import type {
   OneTapAction,
   OneTapActionKind,
   SuggestionResponse,
+  SuggestionExecutedAction,
   SuggestionExecutionResult,
   SystemAdjustment,
   AppLaunch,
@@ -30,6 +31,10 @@ import {
   DynamicSuggestionPackage,
   TimeOfDay,
 } from './DynamicSuggestionService';
+import {
+  deriveSuggestionExecutionStatus,
+  summarizeSuggestionExecution,
+} from '../utils/suggestionExecution';
 
 // 应用名称（用于权限提示）
 const APP_NAME = 'SceneLens';
@@ -114,14 +119,6 @@ interface PermissionStatus {
   hasWriteSettingsPermission: boolean;
   hasWakeLockPermission: boolean;
   hasCalendarPermission: boolean;
-}
-
-interface ExecutedActionResult {
-  type: 'system' | 'app';
-  description: string;
-  success: boolean;
-  error?: string;
-  usedFallback?: boolean;
 }
 
 class SceneSuggestionManagerClass {
@@ -498,9 +495,11 @@ class SceneSuggestionManagerClass {
       return {
         sceneId: sceneType,
         success: result.success,
+        status: result.status,
         executedActions: result.executedActions,
         skippedActions: result.skippedActions,
         fallbackApplied: result.fallbackApplied,
+        summary: result.summary,
         timestamp: Date.now(),
       };
     } catch (error) {
@@ -508,9 +507,11 @@ class SceneSuggestionManagerClass {
       return {
         sceneId: sceneType,
         success: false,
+        status: 'failed',
         executedActions: [],
         skippedActions: [],
         fallbackApplied: false,
+        summary: summarizeSuggestionExecution([], 0),
         timestamp: Date.now(),
       };
     }
@@ -525,11 +526,13 @@ class SceneSuggestionManagerClass {
     options: ExecuteOptions
   ): Promise<{
     success: boolean;
-    executedActions: ExecutedActionResult[];
+    status: SuggestionExecutionResult['status'];
+    executedActions: SuggestionExecutedAction[];
     skippedActions: string[];
     fallbackApplied: boolean;
+    summary: SuggestionExecutionResult['summary'];
   }> {
-    const executedActions: ExecutedActionResult[] = [];
+    const executedActions: SuggestionExecutedAction[] = [];
     const skippedActions: string[] = [];
     let fallbackApplied = false;
     const allowFallback = options.autoFallback === true;
@@ -548,9 +551,11 @@ class SceneSuggestionManagerClass {
             if (!allowFallback) {
               return {
                 success: false,
+                status: 'failed',
                 executedActions,
                 skippedActions,
                 fallbackApplied,
+                summary: summarizeSuggestionExecution(executedActions, skippedActions.length),
               };
             }
 
@@ -568,9 +573,11 @@ class SceneSuggestionManagerClass {
           if (!result.success && !allowFallback) {
             return {
               success: false,
+              status: 'failed',
               executedActions,
               skippedActions,
               fallbackApplied,
+              summary: summarizeSuggestionExecution(executedActions, skippedActions.length),
             };
           }
         }
@@ -588,13 +595,22 @@ class SceneSuggestionManagerClass {
         break;
     }
 
-    // 判断整体是否成功（至少有一个操作成功，或者操作类型是 dismiss/snooze）
+    const summary = summarizeSuggestionExecution(executedActions, skippedActions.length);
+    const status =
+      action.action === 'dismiss'
+        ? 'dismissed'
+        : action.action === 'snooze'
+          ? 'snoozed'
+          : deriveSuggestionExecutionStatus(summary);
+
+    // 判断整体是否成功（至少有一个动作达到可用状态，或者操作类型是 dismiss/snooze）
     const success =
       action.action === 'dismiss' ||
       action.action === 'snooze' ||
-      executedActions.some(a => a.success);
+      summary.automatedCount > 0 ||
+      summary.needsUserInputCount > 0;
 
-    return { success, executedActions, skippedActions, fallbackApplied };
+    return { success, status, executedActions, skippedActions, fallbackApplied, summary };
   }
 
   /**
@@ -603,12 +619,7 @@ class SceneSuggestionManagerClass {
   private async executeSystemAdjustment(
     adjustment: SystemAdjustment,
     permissionStatus: PermissionStatus
-  ): Promise<{
-    type: 'system';
-    description: string;
-    success: boolean;
-    error?: string;
-  }> {
+  ): Promise<SuggestionExecutedAction> {
     try {
       // 记录执行信息
       console.log(`[SceneSuggestionManager] 执行系统调整: ${adjustment.action} - ${adjustment.label}`);
@@ -618,6 +629,7 @@ class SceneSuggestionManagerClass {
           type: 'system',
           description: adjustment.label,
           success: false,
+          completionStatus: 'failed',
           error: 'Do Not Disturb permission not granted',
         };
       }
@@ -630,6 +642,7 @@ class SceneSuggestionManagerClass {
           type: 'system',
           description: adjustment.label,
           success: false,
+          completionStatus: 'failed',
           error: 'Write settings permission not granted',
         };
       }
@@ -639,6 +652,7 @@ class SceneSuggestionManagerClass {
           type: 'system',
           description: adjustment.label,
           success: false,
+          completionStatus: 'failed',
           error: 'Wake lock permission not granted',
         };
       }
@@ -724,6 +738,7 @@ class SceneSuggestionManagerClass {
         type: 'system',
         description: adjustment.label,
         success,
+        completionStatus: success ? 'automated' : 'failed',
         error: error ?? undefined,
       };
     } catch (error) {
@@ -732,6 +747,7 @@ class SceneSuggestionManagerClass {
         type: 'system',
         description: adjustment.label,
         success: false,
+        completionStatus: 'failed',
         error: error instanceof Error ? error.message : String(error),
       };
     }
@@ -743,7 +759,7 @@ class SceneSuggestionManagerClass {
   private async executeAppLaunch(
     appLaunch: AppLaunch,
     allowFallback: boolean
-  ): Promise<ExecutedActionResult> {
+  ): Promise<SuggestionExecutedAction> {
     try {
       // 解析意图为包名
       const packageName = appLaunch.intent
@@ -755,6 +771,7 @@ class SceneSuggestionManagerClass {
           type: 'app',
           description: appLaunch.label,
           success: false,
+          completionStatus: 'failed',
           error: `Unable to resolve package name: ${appLaunch.intent ?? 'unknown'}`,
         };
       }
@@ -766,39 +783,48 @@ class SceneSuggestionManagerClass {
           type: 'app',
           description: appLaunch.label,
           success: false,
+          completionStatus: 'failed',
           error: `App not installed: ${packageName}`,
         };
       }
 
-      // 使用 Deep Link 打开应用
-      const deepLink = appLaunch.deepLink;
-      const success = await SceneBridge.openAppWithDeepLink(packageName, deepLink);
+      const deepLink = appLaunch.deepLink?.trim() || undefined;
 
-      if (success) {
-        return {
-          type: 'app',
-          description: appLaunch.label,
-          success: true,
-        };
-      }
+      if (deepLink) {
+        const success = await SceneBridge.openAppWithDeepLink(packageName, deepLink);
 
-      // Deep-link fallback should be opt-in only.
-      if (!allowFallback) {
-        return {
-          type: 'app',
-          description: appLaunch.label,
-          success: false,
-          error: `Unable to open app deep link: ${packageName}`,
-        };
+        if (success) {
+          return {
+            type: 'app',
+            description: appLaunch.label,
+            success: true,
+            completionStatus: 'needs_user_input',
+          };
+        }
+
+        // Deep-link fallback should be opt-in only.
+        if (!allowFallback) {
+          return {
+            type: 'app',
+            description: appLaunch.label,
+            success: false,
+            completionStatus: 'failed',
+            error: `Unable to open app deep link: ${packageName}`,
+          };
+        }
       }
 
       const fallbackSuccess = await SceneBridge.openAppWithDeepLink(packageName);
       if (fallbackSuccess) {
         return {
           type: 'app',
-          description: `${appLaunch.label}（降级：${appLaunch.fallbackAction}）`,
-          success: true,
+          description: `${appLaunch.label}（${appLaunch.fallbackAction ?? '仅打开应用首页'}）`,
+          success: false,
+          completionStatus: 'opened_app_home',
           usedFallback: true,
+          error: deepLink
+            ? `Deep link unavailable; opened app home only: ${packageName}`
+            : `No verified deep link; opened app home only: ${packageName}`,
         };
       }
 
@@ -806,6 +832,7 @@ class SceneSuggestionManagerClass {
         type: 'app',
         description: appLaunch.label,
         success: false,
+        completionStatus: 'failed',
         error: `Unable to open app: ${packageName}`,
       };
     } catch (error) {
@@ -814,6 +841,7 @@ class SceneSuggestionManagerClass {
         type: 'app',
         description: appLaunch.label,
         success: false,
+        completionStatus: 'failed',
         error: error instanceof Error ? error.message : String(error),
       };
     }

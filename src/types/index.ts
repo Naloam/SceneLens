@@ -254,6 +254,7 @@ export interface MatchedRule {
 export interface ExecutionResult {
   action: Action;
   success: boolean;
+  completionStatus: SuggestionActionCompletionStatus;
   error?: string;
   duration: number;
 }
@@ -523,17 +524,46 @@ export interface SuggestionResponse {
 /**
  * 建议包执行结果
  */
+export type SuggestionActionCompletionStatus =
+  | 'automated'
+  | 'needs_user_input'
+  | 'opened_app_home'
+  | 'failed';
+
+export interface SuggestionExecutedAction {
+  type: 'system' | 'app';
+  description: string;
+  success: boolean;
+  completionStatus: SuggestionActionCompletionStatus;
+  error?: string;
+  usedFallback?: boolean;
+}
+
+export interface SuggestionExecutionSummary {
+  automatedCount: number;
+  needsUserInputCount: number;
+  openedAppHomeCount: number;
+  failedCount: number;
+  skippedCount: number;
+}
+
+export type SuggestionExecutionStatus =
+  | 'completed'
+  | 'needs_user_input'
+  | 'opened_app_home'
+  | 'partial'
+  | 'failed'
+  | 'dismissed'
+  | 'snoozed';
+
 export interface SuggestionExecutionResult {
   sceneId: SceneType;
   success: boolean;
-  executedActions: Array<{
-    type: 'system' | 'app';
-    description: string;
-    success: boolean;
-    error?: string;
-  }>;
+  status: SuggestionExecutionStatus;
+  executedActions: SuggestionExecutedAction[];
   skippedActions: string[];
   fallbackApplied: boolean;
+  summary: SuggestionExecutionSummary;
   timestamp: number;
 }
 

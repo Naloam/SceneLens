@@ -7,20 +7,24 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 
 jest.mock('../../../automation/SystemSettingsController', () => ({
   SystemSettingsController: {
-    setVolumes: jest.fn().mockResolvedValue(undefined),
-    setBrightness: jest.fn().mockResolvedValue(undefined),
-    setDoNotDisturb: jest.fn().mockResolvedValue(undefined),
-    setWiFi: jest.fn().mockResolvedValue(undefined),
-    setBluetooth: jest.fn().mockResolvedValue(undefined),
+    setVolumes: jest.fn().mockResolvedValue(true),
+    setBrightness: jest.fn().mockResolvedValue(true),
+    setDoNotDisturb: jest.fn().mockResolvedValue(true),
+    setWiFi: jest.fn().mockResolvedValue({ success: true }),
+    setBluetooth: jest.fn().mockResolvedValue({ success: true }),
+    setScreenTimeout: jest.fn().mockResolvedValue(true),
+    checkWriteSettingsPermission: jest.fn().mockResolvedValue(true),
+    checkDoNotDisturbPermission: jest.fn().mockResolvedValue(true),
+    checkBluetoothPermission: jest.fn().mockResolvedValue(true),
   },
 }));
 
 jest.mock('../../../automation/AppLaunchController', () => ({
   AppLaunchController: {
-    launchApp: jest.fn().mockResolvedValue(undefined),
-    launchAppWithDeepLink: jest.fn().mockResolvedValue(undefined),
-    openDeepLink: jest.fn().mockResolvedValue(undefined),
-    launchShortcut: jest.fn().mockResolvedValue(undefined),
+    launchApp: jest.fn().mockResolvedValue(true),
+    launchAppWithDeepLink: jest.fn().mockResolvedValue(true),
+    openDeepLink: jest.fn().mockResolvedValue(true),
+    launchShortcut: jest.fn().mockResolvedValue(true),
   },
 }));
 
@@ -34,6 +38,7 @@ jest.mock('../../../learning/PreferenceManager', () => ({
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppLaunchController } from '../../../automation/AppLaunchController';
+import { SystemSettingsController } from '../../../automation/SystemSettingsController';
 import { QuickActionManager } from '../../../quickactions/QuickActionManager';
 import type { QuickAction } from '../../../types/automation';
 
@@ -134,6 +139,39 @@ describe('QuickActionManager', () => {
 
   it('returns false for missing actions', async () => {
     await expect(manager.executeAction('missing_action')).resolves.toBe(false);
+  });
+
+  it('returns a detailed missing-action result', async () => {
+    const result = await manager.executeActionDetailed('missing_action', 'HOME');
+
+    expect(result).toMatchObject({
+      success: false,
+      actionId: 'missing_action',
+      status: 'action_not_found',
+    });
+  });
+
+  it('returns permission_required when system quick action lacks write settings permission', async () => {
+    const action = createAction({
+      id: 'brightness_action',
+      actionType: 'system_setting',
+      actionParams: {
+        setting: 'brightness',
+        value: 0.6,
+      },
+    });
+    (SystemSettingsController.checkWriteSettingsPermission as jest.Mock).mockResolvedValue(false);
+
+    await manager.registerAction(action);
+    const result = await manager.executeActionDetailed(action.id, 'HOME');
+
+    expect(result).toMatchObject({
+      success: false,
+      actionId: 'brightness_action',
+      status: 'permission_required',
+      permission: 'write_settings',
+    });
+    expect(SystemSettingsController.setBrightness).not.toHaveBeenCalled();
   });
 
   it('filters by category using stored actions', async () => {
