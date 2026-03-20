@@ -163,7 +163,7 @@
       "id": "TRAVEL_SCENIC_SPOT",
       "conditions": [
         "image.topLabel === 'outdoor_scenic'",
-        "time.isWeekend"
+        "time.isRestDay"
       ],
       "headlines": [
         "检测到景区环境，旅游愉快！",

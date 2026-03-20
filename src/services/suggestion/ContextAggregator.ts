@@ -23,6 +23,8 @@ import type {
 } from './types';
 import { feedbackLogger } from '../../reflection/FeedbackLogger';
 import { storageManager } from '../../stores/storageManager';
+import sceneBridge from '../../core/SceneBridge';
+import { classifyDay } from './workdayCalendar';
 
 /**
  * 图像标签到环境类型的映射
@@ -153,7 +155,7 @@ export class ContextAggregator {
     const hour = now.getHours();
     const minute = now.getMinutes();
     const dayOfWeek = now.getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const dayClassification = classifyDay(now);
 
     // 判断时段
     const timeOfDay = this.getTimeOfDay(hour);
@@ -172,15 +174,14 @@ export class ContextAggregator {
 
     const timeDescription = `${weekdayNames[dayOfWeek]}${timeOfDayNames[timeOfDay]}${hour}点`;
 
-    // 检查是否节假日（简单实现，后续可扩展）
-    const isHoliday = this.checkIsHoliday(now);
-
     return {
       hour,
       minute,
       dayOfWeek,
-      isWeekend,
-      isHoliday,
+      isWeekend: dayClassification.isWeekend,
+      isHoliday: dayClassification.isHoliday,
+      isWorkday: dayClassification.isWorkday,
+      isRestDay: dayClassification.isRestDay,
       timeOfDay,
       timeDescription,
     };
@@ -197,14 +198,6 @@ export class ContextAggregator {
     if (hour >= 14 && hour < 18) return 'afternoon';
     if (hour >= 18 && hour < 21) return 'evening';
     return 'night';
-  }
-
-  /**
-   * 检查是否节假日（简单实现）
-   */
-  private checkIsHoliday(_date: Date): boolean {
-    // TODO: 可接入节假日 API 或本地数据
-    return false;
   }
 
   /**
@@ -374,28 +367,103 @@ export class ContextAggregator {
    * 构建日历上下文
    */
   private async buildCalendarContext(silentContext: SilentContext | null): Promise<CalendarContext> {
+    try {
+      const hasPermission = await sceneBridge.hasCalendarPermission();
+      if (!hasPermission) {
+        return {
+          available: false,
+          upcomingEvent: null,
+          isInMeeting: false,
+        };
+      }
+
+      const events = await sceneBridge.getUpcomingEvents(2);
+      const now = Date.now();
+      const sortedEvents = [...events].sort((a, b) => a.startTime - b.startTime);
+      const meetingEvents = sortedEvents.filter((event) => this.isMeetingCalendarEvent(event));
+      const currentMeeting = meetingEvents.find(
+        (event) => event.startTime <= now && event.endTime > now
+      ) ?? null;
+      const upcomingMeeting = meetingEvents.find((event) => event.startTime > now) ?? null;
+
+      if (currentMeeting || upcomingMeeting) {
+        return {
+          available: true,
+          upcomingEvent: upcomingMeeting
+            ? {
+                title: upcomingMeeting.title,
+                minutesUntil: Math.max(
+                  0,
+                  Math.round((upcomingMeeting.startTime - now) / (60 * 1000))
+                ),
+                location: upcomingMeeting.location || '',
+                durationMinutes: Math.max(
+                  1,
+                  Math.round((upcomingMeeting.endTime - upcomingMeeting.startTime) / (60 * 1000))
+                ),
+              }
+            : null,
+          isInMeeting: currentMeeting !== null,
+        };
+      }
+
+      return {
+        available: true,
+        upcomingEvent: null,
+        isInMeeting: false,
+      };
+    } catch (error) {
+      console.warn('[ContextAggregator] Failed to load real calendar events:', error);
+    }
+
+    return this.buildCalendarContextFromSignals(silentContext);
+  }
+
+  private buildCalendarContextFromSignals(silentContext: SilentContext | null): CalendarContext {
     let upcomingEvent = null;
     let isInMeeting = false;
 
     if (silentContext) {
-      // 从信号中提取日历信息
       for (const signal of silentContext.signals) {
-        if (signal.type === 'CALENDAR') {
-          // 尝试解析会议信息
-          const meetingMatch = signal.value.match(/会议[:：](.+?)(?:，|,|$)/);
-          const timeMatch = signal.value.match(/(\d+)分钟后/);
+        if (signal.type !== 'CALENDAR') {
+          continue;
+        }
 
-          if (meetingMatch && timeMatch) {
-            upcomingEvent = {
-              title: meetingMatch[1],
-              minutesUntil: parseInt(timeMatch[1], 10),
+        const meetingMatch = signal.value.match(/会议[:：](.+?)(?:，|,|$)/);
+        const timeMatch = signal.value.match(/(\d+)分钟后/);
+
+        if (meetingMatch && timeMatch) {
+          upcomingEvent = {
+            title: meetingMatch[1],
+            minutesUntil: parseInt(timeMatch[1], 10),
+            location: '',
+          };
+        }
+
+        if (signal.value.startsWith('MEETING_')) {
+          if (signal.value === 'MEETING_IMMINENT') {
+            upcomingEvent = upcomingEvent ?? {
+              title: '会议',
+              minutesUntil: 15,
+              location: '',
+            };
+          } else if (signal.value === 'MEETING_SOON') {
+            upcomingEvent = upcomingEvent ?? {
+              title: '会议',
+              minutesUntil: 30,
+              location: '',
+            };
+          } else if (signal.value === 'MEETING_UPCOMING') {
+            upcomingEvent = upcomingEvent ?? {
+              title: '会议',
+              minutesUntil: 120,
               location: '',
             };
           }
+        }
 
-          if (signal.value.includes('会议中') || signal.value.includes('正在开会')) {
-            isInMeeting = true;
-          }
+        if (signal.value.includes('会议中') || signal.value.includes('正在开会')) {
+          isInMeeting = true;
         }
       }
     }
@@ -405,6 +473,27 @@ export class ContextAggregator {
       upcomingEvent,
       isInMeeting,
     };
+  }
+
+  private isMeetingCalendarEvent(event: {
+    title: string;
+    location?: string;
+    description?: string;
+  }): boolean {
+    const content = [
+      event.title,
+      event.location || '',
+      event.description || '',
+    ].join(' ').toLowerCase();
+
+    return (
+      content.includes('会议') ||
+      content.includes('meeting') ||
+      content.includes('电话') ||
+      content.includes('call') ||
+      content.includes('面试') ||
+      content.includes('interview')
+    );
   }
 
   /**

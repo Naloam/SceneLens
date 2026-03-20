@@ -230,7 +230,7 @@ export class SmartSuggestionEngine {
   private evaluateCondition(condition: string, ctx: AggregatedContext): boolean {
     try {
       // 简单的条件解析器
-      // 支持: time.hour >= 7, image.topLabel === 'subway', !time.isWeekend
+      // 支持: time.hour >= 7, image.topLabel === 'subway', time.isWorkday
       
       // 替换上下文变量
       const expression = condition
@@ -238,6 +238,9 @@ export class SmartSuggestionEngine {
         .replace(/time\.minute/g, ctx.time.minute.toString())
         .replace(/time\.dayOfWeek/g, ctx.time.dayOfWeek.toString())
         .replace(/time\.isWeekend/g, ctx.time.isWeekend.toString())
+        .replace(/time\.isHoliday/g, ctx.time.isHoliday.toString())
+        .replace(/time\.isWorkday/g, ctx.time.isWorkday.toString())
+        .replace(/time\.isRestDay/g, ctx.time.isRestDay.toString())
         .replace(/time\.timeOfDay/g, `'${ctx.time.timeOfDay}'`)
         .replace(/image\.topLabel/g, `'${ctx.image.topLabel}'`)
         .replace(/image\.topScore/g, ctx.image.topScore.toString())
@@ -378,6 +381,8 @@ export class SmartSuggestionEngine {
         dayOfWeek,
         isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
         isHoliday: false,
+        isWorkday: dayOfWeek !== 0 && dayOfWeek !== 6,
+        isRestDay: dayOfWeek === 0 || dayOfWeek === 6,
         timeOfDay: hour >= 5 && hour < 12 ? 'morning' :
                    hour >= 12 && hour < 18 ? 'afternoon' :
                    hour >= 18 && hour < 22 ? 'evening' : 'night',

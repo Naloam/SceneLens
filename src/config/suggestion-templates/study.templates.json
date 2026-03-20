@@ -206,7 +206,7 @@
     {
       "id": "STUDY_WEEKEND",
       "conditions": [
-        "time.isWeekend",
+        "time.isRestDay",
         "audio.soundEnvironment !== 'noisy'"
       ],
       "headlines": [

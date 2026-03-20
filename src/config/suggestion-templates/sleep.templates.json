@@ -84,7 +84,7 @@
     {
       "id": "SLEEP_WEEKEND",
       "conditions": [
-        "time.isWeekend",
+        "time.isRestDay",
         "time.hour >= 23 || time.hour < 3"
       ],
       "headlines": [

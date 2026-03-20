@@ -5,7 +5,7 @@
       "id": "COMMUTE_MORNING_SUBWAY",
       "conditions": [
         "time.hour >= 7 && time.hour < 9",
-        "!time.isWeekend",
+        "time.isWorkday",
         "image.topLabel === 'transport_subway'"
       ],
       "headlines": [
@@ -46,7 +46,7 @@
       "id": "COMMUTE_MORNING_BUS",
       "conditions": [
         "time.hour >= 7 && time.hour < 9",
-        "!time.isWeekend",
+        "time.isWorkday",
         "image.topLabel === 'transport_bus'"
       ],
       "headlines": [
@@ -87,12 +87,12 @@
       "id": "COMMUTE_MORNING_WALK",
       "conditions": [
         "time.hour >= 7 && time.hour < 9",
-        "!time.isWeekend",
+        "time.isWorkday",
         "image.environmentType === 'outdoor'",
         "location.transportMode === 'walking'"
       ],
       "headlines": [
-        "{greeting}！步行上班，今天天气{weather}",
+        "{greeting}！步行上班，路上注意节奏",
         "检测到步行中，早晨空气不错哦",
         "周{weekday_name}早上好，走路上班真健康",
         "步行通勤模式，{encouragement}！",
@@ -129,7 +129,7 @@
       "id": "COMMUTE_EVENING_RETURN",
       "conditions": [
         "time.hour >= 17 && time.hour < 19",
-        "!time.isWeekend"
+        "time.isWorkday"
       ],
       "headlines": [
         "下班了，准备回家吧",
@@ -208,7 +208,7 @@
     {
       "id": "COMMUTE_WEEKEND",
       "conditions": [
-        "time.isWeekend",
+        "time.isRestDay",
         "image.environmentType === 'transport'"
       ],
       "headlines": [

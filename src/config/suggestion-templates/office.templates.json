@@ -4,7 +4,7 @@
     {
       "id": "OFFICE_ARRIVED",
       "conditions": [
-        "!time.isWeekend",
+        "time.isWorkday",
         "time.hour >= 8 && time.hour < 10",
         "location.matchedFence === '办公室'"
       ],
@@ -204,7 +204,7 @@
     {
       "id": "OFFICE_OVERTIME",
       "conditions": [
-        "!time.isWeekend",
+        "time.isWorkday",
         "time.hour >= 19"
       ],
       "headlines": [

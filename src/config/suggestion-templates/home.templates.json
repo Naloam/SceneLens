@@ -84,7 +84,7 @@
     {
       "id": "HOME_WEEKEND_MORNING",
       "conditions": [
-        "time.isWeekend",
+        "time.isRestDay",
         "time.hour >= 8 && time.hour < 11",
         "audio.soundEnvironment === 'quiet'"
       ],
@@ -125,7 +125,7 @@
     {
       "id": "HOME_WEEKEND_AFTERNOON",
       "conditions": [
-        "time.isWeekend",
+        "time.isRestDay",
         "time.hour >= 14 && time.hour < 18"
       ],
       "headlines": [

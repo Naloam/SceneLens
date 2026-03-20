@@ -34,6 +34,8 @@ export interface TimeContext {
   isWeekend: boolean;
   /** 是否节假日 */
   isHoliday: boolean;
+  isWorkday: boolean;
+  isRestDay: boolean;
   /** 时段类型 */
   timeOfDay: TimeOfDayType;
   /** 时间描述 (如 "周五下午3点") */

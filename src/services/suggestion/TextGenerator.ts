@@ -5,6 +5,7 @@
  */
 
 import type { AggregatedContext, TimeOfDayType } from './types';
+import { classifyDay } from './workdayCalendar';
 
 /**
  * 内置槽位填充函数类型
@@ -219,8 +220,8 @@ const BUILT_IN_SLOT_FILLERS: Record<string, SlotFiller> = {
     return phrases[Math.floor(Math.random() * phrases.length)];
   },
 
-  // 天气（占位，可后续扩展）
-  weather: () => '天气不错',
+  // 未接入实时天气前，保持中性表达，避免制造伪上下文
+  weather: () => '待确认',
 
   // 基于上下文的建议
   context_based_suggestion: (ctx) => {
@@ -326,7 +327,7 @@ export class TextGenerator {
    */
   fillTemplate(template: string, ctx: AggregatedContext): string {
     // 匹配 {slotName} 格式的槽位
-    return template.replace(/\{(\w+)\}/g, (match, slotName) => {
+    const filled = template.replace(/\{(\w+)\}/g, (match, slotName) => {
       // 优先使用自定义填充器
       const customFiller = this.customFillers.get(slotName);
       if (customFiller) {
@@ -355,6 +356,8 @@ export class TextGenerator {
 
       return match; // 未知槽位保持原样
     });
+
+    return this.postProcessFilledText(filled, ctx);
   }
 
   /**
@@ -417,6 +420,14 @@ export class TextGenerator {
     return current;
   }
 
+  private postProcessFilledText(text: string, ctx: AggregatedContext): string {
+    if (ctx.time.isRestDay && !ctx.time.isWeekend) {
+      return text.replace(/周末/g, '休息日');
+    }
+
+    return text;
+  }
+
   /**
    * 检查模板中的槽位是否都可以填充
    */
@@ -458,3 +469,27 @@ export class TextGenerator {
 // 导出单例
 export const textGenerator = new TextGenerator();
 export default textGenerator;
+
+Object.assign(BUILT_IN_SLOT_FILLERS, {
+  tomorrow_type: () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return classifyDay(tomorrow).dayTypeLabel;
+  },
+  work_hint: (ctx: AggregatedContext) => {
+    if (!ctx.time.isWorkday) {
+      return ctx.time.isWeekend ? '周末' : '休息日';
+    }
+    if (ctx.time.hour >= 19) {
+      return '加班';
+    }
+    return '工作';
+  },
+  weather: () => '待确认',
+  alarm_hint: (ctx: AggregatedContext) => {
+    if (!ctx.time.isWorkday) {
+      return ctx.time.isWeekend ? '周末可以睡个懒觉' : '休息日可以少设点闹钟';
+    }
+    return '记得设好闹钟';
+  },
+});
