@@ -3,6 +3,8 @@ export interface ImportedCoordinates {
   longitude: number;
 }
 
+const AMAP_SHORT_URL_PATTERN = /^https?:\/\/surl\.amap\.com\/[A-Za-z0-9]+/i;
+
 function isValidLatitude(value: number): boolean {
   return Number.isFinite(value) && value >= -90 && value <= 90;
 }
@@ -25,6 +27,39 @@ function safelyDecodeText(text: string): string {
   } catch {
     return text;
   }
+}
+
+export async function resolveLocationImportText(
+  text: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<string> {
+  const normalized = text.trim();
+  if (!normalized || !AMAP_SHORT_URL_PATTERN.test(normalized) || extractCoordinatesFromText(normalized)) {
+    return normalized;
+  }
+
+  try {
+    const response = await fetchImpl(normalized, {
+      method: 'GET',
+      redirect: 'follow',
+    });
+
+    if (response.url) {
+      const resolvedUrl = response.url.trim();
+      if (resolvedUrl && resolvedUrl !== normalized) {
+        return resolvedUrl;
+      }
+    }
+
+    const responseText = await response.text();
+    if (responseText?.trim() && extractCoordinatesFromText(responseText)) {
+      return responseText.trim();
+    }
+  } catch {
+    // Keep the original shared text when short-link expansion fails.
+  }
+
+  return normalized;
 }
 
 export function extractCoordinatesFromText(text: string): ImportedCoordinates | null {

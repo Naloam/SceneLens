@@ -1318,3 +1318,72 @@ This round:
     - meeting-app resolution is now less stale, but there is still no proven auto-open-into-meeting path on this device
   - `TRAVEL.travel_app`
     - still depends on actually installed ticket / airline apps; if none are installed it should truthfully fail instead of pretending success
+
+## 2026-03-21 continued: truthfulness closure follow-up for app launches and map share
+- one-tap app launch truthfulness was still inconsistent inside `SceneSuggestionManager`
+  - previous gap:
+    - it only used `appLaunch.deepLink`
+    - when a suggestion item had no inline deep link, it skipped package-level `deeplinks.json` data and went straight to launcher intent
+    - this caused `HOME.smart_home`, `MEETING.meeting_app`, and `TRAVEL.travel_app` to degrade into "open installed app" even when package configs existed
+  - fix:
+    - `SceneSuggestionManager` now initializes and reads `deepLinkManager`
+    - it now builds launch candidates from:
+      - inline deep link
+      - exact package-level action deep link
+      - package-level generic fallback deep link
+    - completion semantics now match `SceneExecutor`
+      - `open_home` -> `opened_app_home`
+      - target-page entry actions -> `needs_user_input`
+    - when the discovery result cannot satisfy the requested target action, it can prefer another installed package that has the verified deep link
+      - practical example on this OPPO baseline:
+        - `MEETING_APP_TOP1` may resolve to Feishu/Lark
+        - if Lark only has `open_home` but Tencent Meeting is installed and has `open_meeting`, the one-tap flow now prefers Tencent Meeting
+- verified deep-link config corrections added
+  - `com.tencent.wemeet.app`
+    - `wemeet://start_meeting` -> `open_meeting`
+    - `wemeet://launch` -> `open_home`
+  - `com.heytap.smarthome`
+    - `iot://ohome` -> `open_home`
+  - `com.MobileTicket`
+    - truthfulness downgraded to `cn.12306://` -> `open_home`
+    - removed the previous false claim that `cn.12306.mobile://...` could open ticket QR / orders on this device
+- direct adb evidence for the AMap share path
+  - after installing the updated debug build to the connected OPPO, the actual captured share payload was:
+    - `https://surl.amap.com/65Y1zn8142hh`
+  - logcat evidence from tag `SceneLensLocationImport`:
+    - `MainActivity.onCreate action=android.intent.action.SEND type=text/plain`
+    - `text=https://surl.amap.com/65Y1zn8142hh`
+    - `clipText=https://surl.amap.com/65Y1zn8142hh`
+  - conclusion:
+    - the share problem is no longer "native failed to receive content"
+    - the real gap is that AMap shares a short URL, and the import flow previously had no short-link expansion step
+- map share fixes implemented from that evidence
+  - native side now logs location-import intents from:
+    - `MainActivity.onCreate`
+    - `MainActivity.onNewIntent`
+    - `SceneBridgeModule.consumePendingLocationImport`
+    - `SceneBridgeModule.extractPendingLocationImport`
+  - native extraction now also falls back to:
+    - first `clipData` text
+    - first `clipData` uri
+    - `Intent.EXTRA_STREAM`
+  - JS import flow now adds a minimal AMap short-link expansion step
+    - only `https://surl.amap.com/...` is specially handled
+    - it follows the redirect and then reuses the existing coordinate parser on the resolved URL/text
+- tests added / updated for this pass
+  - `src/services/__tests__/SceneSuggestionManager.test.ts`
+    - package-level deep links are now used even when the suggestion item itself has no inline deep link
+    - meeting-app execution can prefer Tencent Meeting when it has the verified target-page deep link
+    - 12306 `launch_ticket_qr` now downgrades to `opened_app_home` when only home-opening is verified
+  - `src/utils/__tests__/locationImport.test.ts`
+    - AMap short-link expansion
+    - short-link expansion failure fallback
+- validation after this pass
+  - `npm run typecheck`
+  - `node .\node_modules\jest-cli\bin\jest.js SceneSuggestionManager --runInBand --silent`
+  - `node .\node_modules\jest-cli\bin\jest.js locationImport --runInBand --silent`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --json --outputFile jest-results.json --forceExit`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --detectOpenHandles`
+  - `.\android\gradlew.bat -p android :app:compileDebugKotlin`
+  - `.\android\gradlew.bat -p android installDebug`
+  - all completed successfully locally

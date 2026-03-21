@@ -33,7 +33,7 @@ import Slider from '@react-native-community/slider';
 import { geoFenceManager } from '../stores';
 import sceneBridge from '../core/SceneBridge';
 import { silentContextEngine } from '../core/SilentContextEngine';
-import { extractCoordinatesFromText } from '../utils/locationImport';
+import { extractCoordinatesFromText, resolveLocationImportText } from '../utils/locationImport';
 import type { GeoFence, Location, GeoFenceType } from '../types';
 
 type FenceConfigType = 'HOME' | 'OFFICE' | 'SUBWAY_STATION';
@@ -404,14 +404,14 @@ export const LocationConfigScreen: React.FC = () => {
     setShowManualInput(true);
   };
 
-  const applyImportedLocationText = useCallback((
+  const applyImportedLocationText = useCallback(async (
     rawText: string,
     targetType: FenceConfigType,
     options?: {
       successTitle?: string;
       failureTitle?: string;
     }
-  ): boolean => {
+  ): Promise<boolean> => {
     const normalizedText = rawText.trim();
     if (!normalizedText) {
       Alert.alert(
@@ -421,11 +421,12 @@ export const LocationConfigScreen: React.FC = () => {
       return false;
     }
 
-    const importedCoordinates = extractCoordinatesFromText(normalizedText);
+    const resolvedText = await resolveLocationImportText(normalizedText);
+    const importedCoordinates = extractCoordinatesFromText(resolvedText);
     setPendingMapImportType(null);
 
     if (!importedCoordinates) {
-      openManualInput(targetType, undefined, normalizedText);
+      openManualInput(targetType, undefined, resolvedText);
       Alert.alert(
         options?.failureTitle ?? '无法自动解析',
         '已把共享内容带回导入框。你可以继续粘贴或整理成经纬度后再保存。'
@@ -433,7 +434,7 @@ export const LocationConfigScreen: React.FC = () => {
       return false;
     }
 
-    openManualInput(targetType, importedCoordinates, normalizedText);
+    openManualInput(targetType, importedCoordinates, resolvedText);
     Alert.alert(
       options?.successTitle ?? '坐标已导入',
       `${importedCoordinates.latitude.toFixed(6)}, ${importedCoordinates.longitude.toFixed(6)}`
@@ -452,7 +453,7 @@ export const LocationConfigScreen: React.FC = () => {
       }
 
       const targetType = pendingMapImportType ?? manualInputType ?? selectedTab;
-      applyImportedLocationText(payload.rawText, targetType, {
+      await applyImportedLocationText(payload.rawText, targetType, {
         successTitle: '已从分享内容导入',
         failureTitle: '分享内容未能自动解析',
       });
@@ -626,7 +627,7 @@ export const LocationConfigScreen: React.FC = () => {
   const importFromPastedText = async () => {
     try {
       Keyboard.dismiss();
-      applyImportedLocationText(importSourceText, manualInputType, {
+      await applyImportedLocationText(importSourceText, manualInputType, {
         successTitle: '已从粘贴内容导入',
         failureTitle: '粘贴内容未能自动解析',
       });

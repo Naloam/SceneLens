@@ -75,6 +75,7 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   companion object {
     const val NAME = "SceneBridge"
     private const val LOG_TAG = "SceneBridge"
+    private const val LOCATION_IMPORT_LOG_TAG = "SceneLensLocationImport"
     private const val MOTION_INTENT_ACTION = "com.che1sy.scenelens.MOTION_UPDATE"
     private const val MOTION_REQUEST_CODE = 2024
     private const val VOLUME_KEY_DOUBLE_TAP_TIMEOUT = 500L // 500ms for double tap detection
@@ -83,6 +84,41 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
     private const val LOCATION_MAX_REUSE_AGE_MS = 30 * 60 * 1000L
     private const val CURRENT_LOCATION_TIMEOUT_MS = 6000L
     private const val LOCATION_ACCURACY_DECISION_THRESHOLD_METERS = 150f
+
+    private fun summarizeIntentValue(value: String?): String {
+      if (value.isNullOrBlank()) {
+        return "null"
+      }
+      return value
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .take(240)
+    }
+
+    fun logLocationImportIntent(stage: String, intent: Intent?) {
+      if (intent == null) {
+        Log.d(LOCATION_IMPORT_LOG_TAG, "$stage intent=null")
+        return
+      }
+
+      val clipData = intent.clipData
+      val firstClipItem = clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+      @Suppress("DEPRECATION")
+      val extraStream = intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+
+      Log.d(
+        LOCATION_IMPORT_LOG_TAG,
+        "$stage action=${intent.action} type=${intent.type} " +
+          "data=${summarizeIntentValue(intent.dataString)} " +
+          "text=${summarizeIntentValue(intent.getStringExtra(Intent.EXTRA_TEXT))} " +
+          "subject=${summarizeIntentValue(intent.getStringExtra(Intent.EXTRA_SUBJECT))} " +
+          "stream=${summarizeIntentValue(extraStream?.toString())} " +
+          "clipCount=${clipData?.itemCount ?: 0} " +
+          "clipText=${summarizeIntentValue(firstClipItem?.text?.toString())} " +
+          "clipUri=${summarizeIntentValue(firstClipItem?.uri?.toString())} " +
+          "consumed=${intent.getBooleanExtra(LOCATION_IMPORT_CONSUMED_EXTRA, false)}"
+      )
+    }
   }
 
   override fun getName() = NAME
@@ -1256,6 +1292,7 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   fun consumePendingLocationImport(promise: Promise) {
     try {
       val activity = ctx.currentActivity ?: getCurrentActivity()
+      logLocationImportIntent("consumePendingLocationImport", activity?.intent)
       val payload = extractPendingLocationImport(activity?.intent, true)
       promise.resolve(payload)
     } catch (t: Throwable) {
@@ -1331,10 +1368,15 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
     markConsumed: Boolean
   ): com.facebook.react.bridge.WritableMap? {
     if (intent == null) return null
+    logLocationImportIntent("extractPendingLocationImport", intent)
     if (intent.getBooleanExtra(LOCATION_IMPORT_CONSUMED_EXTRA, false)) {
       return null
     }
 
+    val clipData = intent.clipData
+    val firstClipItem = clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+    @Suppress("DEPRECATION")
+    val extraStream = intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
     val rawText = when (intent.action) {
       Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
         ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
@@ -1344,8 +1386,12 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
       else -> intent.getStringExtra(Intent.EXTRA_TEXT)
         ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
     }
+      ?: firstClipItem?.text?.toString()
+      ?: firstClipItem?.uri?.toString()
+      ?: extraStream?.toString()
 
     if (rawText.isNullOrBlank()) {
+      logLocationImportIntent("extractPendingLocationImport.empty", intent)
       return null
     }
 

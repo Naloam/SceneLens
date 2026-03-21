@@ -25,6 +25,7 @@ import SceneBridge from '../core/SceneBridge';
 import { SystemSettingsController } from '../automation/SystemSettingsController';
 import { resolveDoNotDisturbSettings } from '../automation/systemSettingTransforms';
 import type { VolumeStreamType } from '../types/automation';
+import type { SuggestionActionCompletionStatus } from '../types';
 import { storageManager } from '../stores/storageManager';
 import { 
   dynamicSuggestionService, 
@@ -35,6 +36,7 @@ import {
   deriveSuggestionExecutionStatus,
   summarizeSuggestionExecution,
 } from '../utils/suggestionExecution';
+import { deepLinkManager } from '../utils/deepLinkManager';
 
 // 应用名称（用于权限提示）
 const APP_NAME = 'SceneLens';
@@ -158,6 +160,7 @@ class SceneSuggestionManagerClass {
 
   private async performInitialize(): Promise<void> {
     await this.loadConfig();
+    await deepLinkManager.initialize();
     await sceneExecutor.initialize();
     await dynamicSuggestionService.initialize();
   }
@@ -761,9 +764,11 @@ class SceneSuggestionManagerClass {
     allowFallback: boolean
   ): Promise<SuggestionExecutedAction> {
     try {
+      const requestedAction = this.resolveAppLaunchAction(appLaunch.action);
+
       // 解析意图为包名
       const packageName = appLaunch.intent
-        ? await this.resolveIntent(appLaunch.intent)
+        ? await this.resolvePreferredLaunchPackage(appLaunch.intent, requestedAction)
         : undefined;
 
       if (!packageName) {
@@ -788,30 +793,64 @@ class SceneSuggestionManagerClass {
         };
       }
 
-      const deepLink = appLaunch.deepLink?.trim() || undefined;
+      const config = deepLinkManager.getConfig(packageName);
+      const candidateUrls: Array<{ url: string; resolvedAction?: string }> = [];
+      const pushCandidate = (url: string | undefined | null) => {
+        if (!url || candidateUrls.some(candidate => candidate.url === url)) {
+          return;
+        }
+        const resolvedAction = config?.deepLinks.find(dl => dl.url === url)?.action;
+        candidateUrls.push({ url, resolvedAction });
+      };
 
-      if (deepLink) {
-        const success = await SceneBridge.openAppWithDeepLink(packageName, deepLink);
+      const explicitDeepLink = appLaunch.deepLink?.trim() || undefined;
+      pushCandidate(explicitDeepLink);
 
-        if (success) {
-          return {
-            type: 'app',
-            description: appLaunch.label,
-            success: true,
-            completionStatus: 'needs_user_input',
-          };
+      const hasExactActionDeepLink = Boolean(
+        requestedAction && config?.deepLinks.some(dl => dl.action === requestedAction)
+      );
+      if (hasExactActionDeepLink) {
+        pushCandidate(deepLinkManager.getDeepLink(packageName, requestedAction));
+      }
+
+      if (config?.deepLinks.length) {
+        pushCandidate(deepLinkManager.getDeepLink(packageName));
+      }
+
+      for (const candidate of candidateUrls) {
+        const success = await SceneBridge.openAppWithDeepLink(packageName, candidate.url);
+        if (!success) {
+          continue;
         }
 
-        // Deep-link fallback should be opt-in only.
-        if (!allowFallback) {
+        const completionStatus = this.classifyAppLaunchCompletionStatus(appLaunch, candidate.resolvedAction);
+        if (completionStatus === 'opened_app_home') {
           return {
             type: 'app',
-            description: appLaunch.label,
+            description: `${appLaunch.label}（${appLaunch.fallbackAction ?? '仅打开应用首页'}）`,
             success: false,
-            completionStatus: 'failed',
-            error: `Unable to open app deep link: ${packageName}`,
+            completionStatus,
+            usedFallback: true,
+            error: `Opened app home only: ${packageName}`,
           };
         }
+
+        return {
+          type: 'app',
+          description: appLaunch.label,
+          success: true,
+          completionStatus,
+        };
+      }
+
+      if (candidateUrls.length > 0 && !allowFallback) {
+        return {
+          type: 'app',
+          description: appLaunch.label,
+          success: false,
+          completionStatus: 'failed',
+          error: `Unable to open app deep link: ${packageName}`,
+        };
       }
 
       const fallbackSuccess = await SceneBridge.openAppWithDeepLink(packageName);
@@ -822,7 +861,7 @@ class SceneSuggestionManagerClass {
           success: false,
           completionStatus: 'opened_app_home',
           usedFallback: true,
-          error: deepLink
+          error: candidateUrls.length > 0
             ? `Deep link unavailable; opened app home only: ${packageName}`
             : `No verified deep link; opened app home only: ${packageName}`,
         };
@@ -861,26 +900,7 @@ class SceneSuggestionManagerClass {
       console.warn('[SceneSuggestionManager] AppDiscoveryEngine resolve failed, fallback to defaults', error);
     }
 
-    const fallbackCandidates: Record<string, string[]> = {
-      TRANSIT_APP_TOP1: ['com.eg.android.AlipayGphone'],
-      MUSIC_PLAYER_TOP1: ['com.netease.cloudmusic'],
-      CALENDAR_TOP1: ['com.coloros.calendar', 'com.android.calendar', 'com.google.android.calendar'],
-      MEETING_APP_TOP1: [
-        'com.ss.android.lark',
-        'com.tencent.wemeet.app',
-        'com.alibaba.android.rimet',
-        'com.tencent.wework',
-      ],
-      STUDY_APP_TOP1: ['camp.firefly.foresto'],
-      TRAVEL_APP_TOP1: [
-        'com.MobileTicket',
-        'ctrip.android.view',
-        'com.Qunar',
-        'com.cares.airtravelphone',
-      ],
-      SMART_HOME_TOP1: ['com.heytap.smarthome', 'com.xiaomi.smarthome', 'com.tuya.smart'],
-    };
-    const candidates = fallbackCandidates[intent];
+    const candidates = this.getFallbackCandidates(intent);
     if (!candidates || candidates.length === 0) {
       return null;
     }
@@ -896,6 +916,123 @@ class SceneSuggestionManagerClass {
     }
 
     return candidates[0] ?? null;
+  }
+
+  private getFallbackCandidates(intent: string): string[] {
+    const fallbackCandidates: Record<string, string[]> = {
+      TRANSIT_APP_TOP1: ['com.eg.android.AlipayGphone'],
+      MUSIC_PLAYER_TOP1: ['com.netease.cloudmusic'],
+      CALENDAR_TOP1: ['com.coloros.calendar', 'com.android.calendar', 'com.google.android.calendar'],
+      MEETING_APP_TOP1: [
+        'com.tencent.wemeet.app',
+        'com.ss.android.lark',
+        'com.alibaba.android.rimet',
+        'com.tencent.wework',
+      ],
+      STUDY_APP_TOP1: ['camp.firefly.foresto'],
+      TRAVEL_APP_TOP1: [
+        'com.MobileTicket',
+        'ctrip.android.view',
+        'com.Qunar',
+        'com.cares.airtravelphone',
+      ],
+      SMART_HOME_TOP1: ['com.heytap.smarthome', 'com.xiaomi.smarthome', 'com.tuya.smart'],
+    };
+
+    return fallbackCandidates[intent] ?? [];
+  }
+
+  private async resolvePreferredLaunchPackage(
+    intent: string,
+    requestedAction?: string
+  ): Promise<string | null> {
+    const resolvedPackageName = await this.resolveIntent(intent);
+    if (!resolvedPackageName || !requestedAction) {
+      return resolvedPackageName;
+    }
+
+    const resolvedConfig = deepLinkManager.getConfig(resolvedPackageName);
+    if (resolvedConfig?.deepLinks.some(dl => dl.action === requestedAction)) {
+      return resolvedPackageName;
+    }
+
+    const candidates = this.getFallbackCandidates(intent);
+    for (const candidatePackage of candidates) {
+      if (candidatePackage === resolvedPackageName) {
+        continue;
+      }
+
+      const candidateConfig = deepLinkManager.getConfig(candidatePackage);
+      if (!candidateConfig?.deepLinks.some(dl => dl.action === requestedAction)) {
+        continue;
+      }
+
+      try {
+        if (await SceneBridge.isAppInstalled(candidatePackage)) {
+          return candidatePackage;
+        }
+      } catch (error) {
+        console.warn(`[SceneSuggestionManager] Failed to check app install state for ${candidatePackage}:`, error);
+      }
+    }
+
+    return resolvedPackageName;
+  }
+
+  private resolveAppLaunchAction(action: string): string | undefined {
+    const actionMap: Record<string, string> = {
+      open_ticket_qr: 'open_ticket_qr',
+      launch_ticket_qr: 'open_ticket_qr',
+      launch_with_playlist: 'open_player',
+      open_calendar: 'open_events',
+      open_events: 'open_events',
+      open_meeting_details: 'open_meeting_details',
+      launch_meeting: 'open_meeting',
+      launch: 'open_home',
+      start_focus: 'open_focus',
+    };
+
+    return actionMap[action] ?? action;
+  }
+
+  private classifyAppLaunchCompletionStatus(
+    appLaunch: AppLaunch,
+    resolvedAction?: string
+  ): SuggestionActionCompletionStatus {
+    const launchOnlyActions = new Set(['launch', 'launch_with_playlist']);
+    const targetPageActions = new Set([
+      'open_ticket_qr',
+      'launch_ticket_qr',
+      'open_ticket',
+      'open_events',
+      'open_calendar',
+      'open_meeting',
+      'launch_meeting',
+      'open_meeting_details',
+      'open_orders',
+      'open_map',
+      'view_location',
+      'open_player',
+      'open_focus',
+    ]);
+
+    if (resolvedAction === 'open_home') {
+      return 'opened_app_home';
+    }
+
+    if (launchOnlyActions.has(appLaunch.action)) {
+      return 'opened_app_home';
+    }
+
+    if (targetPageActions.has(appLaunch.action)) {
+      return 'needs_user_input';
+    }
+
+    if (resolvedAction && targetPageActions.has(resolvedAction)) {
+      return 'needs_user_input';
+    }
+
+    return 'opened_app_home';
   }
 
   /**

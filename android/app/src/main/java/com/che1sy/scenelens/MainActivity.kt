@@ -20,7 +20,11 @@ class MainActivity : ReactActivity() {
     // This is required for expo-splash-screen.
     setTheme(R.style.AppTheme);
     super.onCreate(null)
-    
+
+    if (intent?.action == Intent.ACTION_SEND || intent?.action == Intent.ACTION_VIEW) {
+      SceneBridgeModule.logLocationImportIntent("MainActivity.onCreate", intent)
+    }
+
     // Handle shortcut intent
     handleShortcutIntent(intent)
   }
@@ -28,6 +32,9 @@ class MainActivity : ReactActivity() {
   override fun onNewIntent(intent: Intent?) {
     super.onNewIntent(intent)
     setIntent(intent)
+    if (intent?.action == Intent.ACTION_SEND || intent?.action == Intent.ACTION_VIEW) {
+      SceneBridgeModule.logLocationImportIntent("MainActivity.onNewIntent", intent)
+    }
     // Handle shortcut intent when app is already running
     handleShortcutIntent(intent)
   }

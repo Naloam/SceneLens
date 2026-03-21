@@ -154,13 +154,19 @@
         ]
       },
       "tencentmeeting": {
-        "packageName": "com.tencent.mm",
+        "packageName": "com.tencent.wemeet.app",
         "name": "腾讯会议",
         "deeplinks": [
           {
-            "url": "xl://",
-            "description": "打开腾讯会议",
+            "url": "wemeet://start_meeting",
+            "description": "Open Tencent Meeting entry page",
             "action": "open_meeting",
+            "fallback": "打开首页"
+          },
+          {
+            "url": "wemeet://launch",
+            "description": "Open Tencent Meeting home",
+            "action": "open_home",
             "fallback": "打开首页"
           }
         ]
@@ -222,15 +228,9 @@
         "name": "铁路12306",
         "deeplinks": [
           {
-            "url": "cn.12306.mobile://",
-            "description": "打开12306",
-            "action": "open_ticket_qr",
-            "fallback": "打开首页"
-          },
-          {
-            "url": "cn.12306.mobile://myOrder/init",
-            "description": "我的订单",
-            "action": "open_orders",
+            "url": "cn.12306://",
+            "description": "Open 12306 home",
+            "action": "open_home",
             "fallback": "打开首页"
           }
         ]
@@ -339,6 +339,18 @@
       }
     },
     "smart_home": {
+      "opposmarthome": {
+        "packageName": "com.heytap.smarthome",
+        "name": "OPPO Smart Home",
+        "deeplinks": [
+          {
+            "url": "iot://ohome",
+            "description": "Open OPPO Smart Home",
+            "action": "open_home",
+            "fallback": "打开首页"
+          }
+        ]
+      },
       "mihome": {
         "packageName": "com.xiaomi.smarthome",
         "name": "米家",

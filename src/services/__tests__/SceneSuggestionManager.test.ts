@@ -129,11 +129,97 @@ jest.mock('../../discovery', () => ({
         TRANSIT_APP_TOP1: 'com.eg.android.AlipayGphone',
         MUSIC_PLAYER_TOP1: 'com.netease.cloudmusic',
         SMART_HOME_TOP1: 'com.xiaomi.smarthome',
+        MEETING_APP_TOP1: 'com.ss.android.lark',
+        TRAVEL_APP_TOP1: 'com.MobileTicket',
       };
       return map[intent] || null;
     }),
   },
 }));
+
+jest.mock('../../utils/deepLinkManager', () => {
+  const configs: Record<
+    string,
+    Array<{ action: string; url: string }>
+  > = {
+    'com.eg.android.AlipayGphone': [
+      {
+        action: 'open_ticket_qr',
+        url: 'alipays://platformapi/startapp?appId=200011235',
+      },
+    ],
+    'com.netease.cloudmusic': [
+      {
+        action: 'open_player',
+        url: 'orpheus://',
+      },
+    ],
+    'com.xiaomi.smarthome': [
+      {
+        action: 'open_home',
+        url: 'mihome://',
+      },
+    ],
+    'com.heytap.smarthome': [
+      {
+        action: 'open_home',
+        url: 'iot://ohome',
+      },
+    ],
+    'com.ss.android.lark': [
+      {
+        action: 'open_home',
+        url: 'feishu://',
+      },
+    ],
+    'com.tencent.wemeet.app': [
+      {
+        action: 'open_meeting',
+        url: 'wemeet://start_meeting',
+      },
+      {
+        action: 'open_home',
+        url: 'wemeet://launch',
+      },
+    ],
+    'com.MobileTicket': [
+      {
+        action: 'open_home',
+        url: 'cn.12306://',
+      },
+    ],
+  };
+
+  return {
+    deepLinkManager: {
+      initialize: jest.fn(() => Promise.resolve()),
+      getConfig: jest.fn((packageName: string) => {
+        const deepLinks = configs[packageName];
+        if (!deepLinks) {
+          return undefined;
+        }
+        return {
+          packageName,
+          appName: packageName,
+          deepLinks: deepLinks.map((deepLink, index) => ({
+            ...deepLink,
+            priority: index + 1,
+          })),
+        };
+      }),
+      getDeepLink: jest.fn((packageName: string, action?: string) => {
+        const deepLinks = configs[packageName];
+        if (!deepLinks || deepLinks.length === 0) {
+          return null;
+        }
+        if (!action) {
+          return deepLinks[0].url;
+        }
+        return deepLinks.find(deepLink => deepLink.action === action)?.url ?? null;
+      }),
+    },
+  };
+});
 
 jest.mock('../../executors/SceneExecutor', () => ({
   sceneExecutor: {
@@ -163,6 +249,7 @@ import { storageManager } from '../../stores/storageManager';
 import { sceneExecutor } from '../../executors/SceneExecutor';
 import { dynamicSuggestionService } from '../DynamicSuggestionService';
 import { SystemSettingsController } from '../../automation/SystemSettingsController';
+import { deepLinkManager } from '../../utils/deepLinkManager';
 
 describe('SceneSuggestionManager', () => {
   let manager: SceneSuggestionManager;
@@ -403,7 +490,60 @@ describe('SceneSuggestionManager', () => {
         completionStatus: 'opened_app_home',
         usedFallback: true,
       });
-      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledWith('com.xiaomi.smarthome');
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledWith('com.xiaomi.smarthome', 'mihome://');
+    });
+
+    it('prefers another installed meeting app when it has the verified target-page deep link', async () => {
+      await manager.initialize();
+
+      const result = await (manager as any).executeAppLaunch(
+        {
+          id: 'meeting_app',
+          label: 'Meeting App',
+          description: 'Prepare meeting',
+          intent: 'MEETING_APP_TOP1',
+          action: 'launch_meeting',
+          fallbackAction: 'Open homepage',
+        },
+        true
+      );
+
+      expect(appDiscoveryEngine.resolveIntent).toHaveBeenCalledWith('MEETING_APP_TOP1');
+      expect(deepLinkManager.getConfig).toHaveBeenCalledWith('com.ss.android.lark');
+      expect(deepLinkManager.getConfig).toHaveBeenCalledWith('com.tencent.wemeet.app');
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledWith(
+        'com.tencent.wemeet.app',
+        'wemeet://start_meeting'
+      );
+      expect(result).toMatchObject({
+        type: 'app',
+        success: true,
+        completionStatus: 'needs_user_input',
+      });
+    });
+
+    it('downgrades 12306 launch_ticket_qr to opened_app_home when only a home deeplink is verified', async () => {
+      await manager.initialize();
+
+      const result = await (manager as any).executeAppLaunch(
+        {
+          id: 'travel_app',
+          label: 'Travel App',
+          description: 'Open travel app',
+          intent: 'TRAVEL_APP_TOP1',
+          action: 'launch_ticket_qr',
+          fallbackAction: 'Open homepage',
+        },
+        true
+      );
+
+      expect(sceneBridge.openAppWithDeepLink).toHaveBeenCalledWith('com.MobileTicket', 'cn.12306://');
+      expect(result).toMatchObject({
+        type: 'app',
+        success: false,
+        completionStatus: 'opened_app_home',
+        usedFallback: true,
+      });
     });
 
     it('handles dismiss and invalid selections', async () => {

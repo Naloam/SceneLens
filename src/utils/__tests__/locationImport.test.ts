@@ -1,4 +1,4 @@
-import { extractCoordinatesFromText } from '../locationImport';
+import { extractCoordinatesFromText, resolveLocationImportText } from '../locationImport';
 
 describe('locationImport', () => {
   const beijing = {
@@ -103,5 +103,28 @@ describe('locationImport', () => {
     expect(
       extractCoordinatesFromText('https://www.google.com/maps/search/?api=1&query=131.2304,221.4737')
     ).toBeNull();
+  });
+
+  it('resolves AMap short links before parsing coordinates', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      url: 'https://uri.amap.com/marker?position=116.4074,39.9042&name=test',
+      text: jest.fn().mockResolvedValue(''),
+    });
+
+    const resolved = await resolveLocationImportText('https://surl.amap.com/65Y1zn8142hh', fetchMock as any);
+
+    expect(fetchMock).toHaveBeenCalledWith('https://surl.amap.com/65Y1zn8142hh', {
+      method: 'GET',
+      redirect: 'follow',
+    });
+    expect(resolved).toBe('https://uri.amap.com/marker?position=116.4074,39.9042&name=test');
+    expect(extractCoordinatesFromText(resolved)).toEqual(beijing);
+  });
+
+  it('keeps the original shared text when short-link expansion fails', async () => {
+    const originalText = 'https://surl.amap.com/65Y1zn8142hh';
+    const fetchMock = jest.fn().mockRejectedValue(new Error('network down'));
+
+    await expect(resolveLocationImportText(originalText, fetchMock as any)).resolves.toBe(originalText);
   });
 });
