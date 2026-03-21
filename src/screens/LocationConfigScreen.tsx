@@ -33,7 +33,12 @@ import Slider from '@react-native-community/slider';
 import { geoFenceManager } from '../stores';
 import sceneBridge from '../core/SceneBridge';
 import { silentContextEngine } from '../core/SilentContextEngine';
-import { extractCoordinatesFromText, resolveLocationImportText } from '../utils/locationImport';
+import {
+  extractCoordinatesFromText,
+  isAmapPlaceholderLocationText,
+  isLikelyAmapShortUrl,
+  resolveLocationImportText,
+} from '../utils/locationImport';
 import type { GeoFence, Location, GeoFenceType } from '../types';
 
 type FenceConfigType = 'HOME' | 'OFFICE' | 'SUBWAY_STATION';
@@ -421,12 +426,28 @@ export const LocationConfigScreen: React.FC = () => {
       return false;
     }
 
-    const resolvedText = await resolveLocationImportText(normalizedText);
+    let resolvedText = normalizedText;
+    if (isLikelyAmapShortUrl(normalizedText)) {
+      try {
+        resolvedText = await sceneBridge.resolveLocationImportUrl(normalizedText);
+      } catch (error) {
+        console.warn('原生高德短链展开失败，回退到 JS 解析:', error);
+      }
+    }
+    resolvedText = await resolveLocationImportText(resolvedText);
     const importedCoordinates = extractCoordinatesFromText(resolvedText);
     setPendingMapImportType(null);
 
     if (!importedCoordinates) {
-      openManualInput(targetType, undefined, resolvedText);
+      const isAmapPlaceholder = isAmapPlaceholderLocationText(resolvedText);
+      openManualInput(targetType, undefined, isAmapPlaceholder ? normalizedText : resolvedText);
+      if (isAmapPlaceholder) {
+        Alert.alert(
+          options?.failureTitle ?? '无法自动解析',
+          '这次高德分享只包含 0,0 占位链接，SceneLens 已收到分享，但无法恢复真实坐标。建议直接复制经纬度，或改用其他可带坐标的地图链接导入。'
+        );
+        return false;
+      }
       Alert.alert(
         options?.failureTitle ?? '无法自动解析',
         '已把共享内容带回导入框。你可以继续粘贴或整理成经纬度后再保存。'

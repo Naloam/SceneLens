@@ -1,4 +1,9 @@
-import { extractCoordinatesFromText, resolveLocationImportText } from '../locationImport';
+import {
+  extractCoordinatesFromText,
+  isAmapPlaceholderLocationText,
+  isLikelyAmapShortUrl,
+  resolveLocationImportText,
+} from '../locationImport';
 
 describe('locationImport', () => {
   const beijing = {
@@ -20,6 +25,16 @@ describe('locationImport', () => {
     {
       name: 'AMap marker URLs that use lng,lat ordering',
       input: 'https://uri.amap.com/marker?position=116.4074,39.9042&name=test',
+      expected: beijing,
+    },
+    {
+      name: 'AMap web share links that use q=lng,lat ordering',
+      input: 'https://www.amap.com/?q=116.4074,39.9042,SceneLens',
+      expected: beijing,
+    },
+    {
+      name: 'AMap mobile share links that nest q=lng,lat ordering',
+      input: 'https://m.amap.com/callAPP?android=androidamap%3Faction%3Dshorturl%26q%3D116.4074%2C39.9042%2C&mo=http%3A%2F%2Fm.amap.com%2F%3Fq%3D116.4074%2C39.9042%2C',
       expected: beijing,
     },
     {
@@ -126,5 +141,31 @@ describe('locationImport', () => {
     const fetchMock = jest.fn().mockRejectedValue(new Error('network down'));
 
     await expect(resolveLocationImportText(originalText, fetchMock as any)).resolves.toBe(originalText);
+  });
+
+  it('rejects AMap placeholder coordinates after short-link expansion', () => {
+    expect(
+      extractCoordinatesFromText(
+        'https://m.amap.com/callAPP?android=androidamap%3Faction%3Dshorturl%26q%3D0%2C0%2C&wp=viewMap%3Flat%3D0%26lon%3D0'
+      )
+    ).toBeNull();
+  });
+
+  it('detects AMap short links', () => {
+    expect(isLikelyAmapShortUrl('https://surl.amap.com/65Y1zn8142hh')).toBe(true);
+    expect(isLikelyAmapShortUrl('https://uri.amap.com/marker?position=116.4074,39.9042')).toBe(false);
+  });
+
+  it('detects AMap placeholder share text', () => {
+    expect(
+      isAmapPlaceholderLocationText(
+        'https://m.amap.com/callAPP?android=androidamap%3Faction%3Dshorturl%26q%3D0%2C0%2C&wp=viewMap%3Flat%3D0%26lon%3D0'
+      )
+    ).toBe(true);
+    expect(
+      isAmapPlaceholderLocationText(
+        'https://m.amap.com/callAPP?android=androidamap%3Faction%3Dshorturl%26q%3D116.4074%2C39.9042%2C'
+      )
+    ).toBe(false);
   });
 });

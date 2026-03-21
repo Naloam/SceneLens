@@ -4,6 +4,19 @@ export interface ImportedCoordinates {
 }
 
 const AMAP_SHORT_URL_PATTERN = /^https?:\/\/surl\.amap\.com\/[A-Za-z0-9]+/i;
+const AMAP_PLACEHOLDER_PATTERN = /(?:surl\.amap\.com|m\.amap\.com\/callAPP|androidamap\?action=shorturl|viewMap\?sourceApplication=from_wb)/i;
+const AMAP_Q_COORDINATES_PATTERN = /(?:^|[?&])q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,|(?:%2C)|$)/i;
+const AMAP_Q_SOURCE_PATTERN = /(?:^https?:\/\/(?:m|www)\.amap\.com\/\?q=|(?:^|[?&])android=androidamap|androidamap\?action=shorturl|(?:^|[?&])mo=https?:\/\/m\.amap\.com\/\?q=)/i;
+const ZERO_COORDINATE_PATTERN = /(?:^|[?&])(?:q|position|location)=0(?:\.0+)?,0(?:\.0+)?(?:,|$)|(?:^|[?&])lat(?:itude)?=0(?:\.0+)?[&;](?:lng|lon|longitude)=0(?:\.0+)?|(?:^|[?&])(?:lng|lon|longitude)=0(?:\.0+)?[&;]lat(?:itude)?=0(?:\.0+)?/i;
+
+export function isLikelyAmapShortUrl(text: string): boolean {
+  return AMAP_SHORT_URL_PATTERN.test(text.trim());
+}
+
+export function isAmapPlaceholderLocationText(text: string): boolean {
+  const normalized = safelyDecodeText(text).replace(/\+/g, ' ');
+  return AMAP_PLACEHOLDER_PATTERN.test(normalized) && ZERO_COORDINATE_PATTERN.test(normalized);
+}
 
 function isValidLatitude(value: number): boolean {
   return Number.isFinite(value) && value >= -90 && value <= 90;
@@ -19,6 +32,26 @@ function buildCoordinates(latitude: number, longitude: number): ImportedCoordina
   }
 
   return { latitude, longitude };
+}
+
+function sanitizeCoordinates(
+  coordinates: ImportedCoordinates | null,
+  sourceText: string
+): ImportedCoordinates | null {
+  if (!coordinates) {
+    return null;
+  }
+
+  // AMap short-link fallbacks frequently expose 0,0 placeholders. Treat them as unresolved.
+  if (
+    coordinates.latitude === 0 &&
+    coordinates.longitude === 0 &&
+    isAmapPlaceholderLocationText(sourceText)
+  ) {
+    return null;
+  }
+
+  return coordinates;
 }
 
 function safelyDecodeText(text: string): string {
@@ -64,6 +97,14 @@ export async function resolveLocationImportText(
 
 export function extractCoordinatesFromText(text: string): ImportedCoordinates | null {
   const normalized = safelyDecodeText(text).replace(/\+/g, ' ');
+
+  const amapQMatch = normalized.match(AMAP_Q_COORDINATES_PATTERN);
+  if (amapQMatch && AMAP_Q_SOURCE_PATTERN.test(normalized)) {
+    return sanitizeCoordinates(
+      buildCoordinates(Number.parseFloat(amapQMatch[2]), Number.parseFloat(amapQMatch[1])),
+      normalized
+    );
+  }
 
   const explicitPatterns: Array<{
     pattern: RegExp;
@@ -129,7 +170,7 @@ export function extractCoordinatesFromText(text: string): ImportedCoordinates | 
     if (match) {
       const coordinates = map(match);
       if (coordinates) {
-        return coordinates;
+        return sanitizeCoordinates(coordinates, normalized);
       }
     }
   }
@@ -139,8 +180,11 @@ export function extractCoordinatesFromText(text: string): ImportedCoordinates | 
     return null;
   }
 
-  return buildCoordinates(
-    Number.parseFloat(fallback[1]),
-    Number.parseFloat(fallback[2])
+  return sanitizeCoordinates(
+    buildCoordinates(
+      Number.parseFloat(fallback[1]),
+      Number.parseFloat(fallback[2])
+    ),
+    normalized
   );
 }

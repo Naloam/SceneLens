@@ -1387,3 +1387,37 @@ This round:
   - `.\android\gradlew.bat -p android :app:compileDebugKotlin`
   - `.\android\gradlew.bat -p android installDebug`
   - all completed successfully locally
+
+## 2026-03-21 - AMap share adb truthfulness follow-up
+
+- real-device path verified on the connected OPPO with adb:
+  - AMap fixed-location page -> share panel -> horizontal swipe -> `更多` -> `SceneLens`
+  - this is a user-reachable path, not the earlier unreliable synthetic `adb am start ... SEND ... -n/-p ...` shortcut
+- actual intent payload captured after the real `更多 -> SceneLens` path:
+  - `action=android.intent.action.SEND`
+  - `type=text/plain`
+  - `text=https://surl.amap.com/7triKOaog4l`
+  - `clipText=https://surl.amap.com/7triKOaog4l`
+  - `extras=android.intent.extra.TEXT`
+  - `html=null`
+  - `clipHtml=null`
+- redirect chain captured from `SceneLensLocationImport`:
+  - `surl.amap.com/...`
+  - `wb.amap.com/?...q=0,0,...`
+  - `m.amap.com/callAPP?...lat=0&lon=0...`
+  - final payload still contained only placeholder coordinates
+- fact-checked conclusion:
+  - for this AMap share class, SceneLens is already receiving the real share intent correctly
+  - the remaining failure is upstream data loss: the delivered payload itself does not contain recoverable real coordinates
+  - this case must stay classified as "share received, but manual follow-up required", not automatic success
+- incremental fixes added from this round:
+  - `SceneBridgeModule` now logs `EXTRA_HTML_TEXT`, `clip htmlText`, and intent extra keys; extraction also falls back to HTML text when present
+  - `locationImport` now supports AMap `q=lng,lat` ordering for real AMap web/mobile links
+  - placeholder AMap shares are explicitly detected so the UI keeps the original short URL instead of replacing it with a huge expanded `callAPP` string
+  - the fallback alert now states that this AMap share only contains `0,0` placeholder data and cannot be auto-imported
+- validation for the follow-up patch:
+  - `npm run typecheck`
+  - `node .\node_modules\jest-cli\bin\jest.js locationImport --runInBand --silent`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --json --outputFile jest-results.json --forceExit`
+  - `node .\node_modules\jest-cli\bin\jest.js --runInBand --silent --detectOpenHandles`
+  - `.\android\gradlew.bat -p android :app:compileDebugKotlin`

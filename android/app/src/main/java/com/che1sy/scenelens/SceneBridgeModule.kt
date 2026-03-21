@@ -64,6 +64,8 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Calendar
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -103,6 +105,7 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
 
       val clipData = intent.clipData
       val firstClipItem = clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+      val extrasKeys = intent.extras?.keySet()?.sorted()?.joinToString(",") ?: "none"
       @Suppress("DEPRECATION")
       val extraStream = intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
 
@@ -111,11 +114,14 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
         "$stage action=${intent.action} type=${intent.type} " +
           "data=${summarizeIntentValue(intent.dataString)} " +
           "text=${summarizeIntentValue(intent.getStringExtra(Intent.EXTRA_TEXT))} " +
+          "html=${summarizeIntentValue(intent.getStringExtra(Intent.EXTRA_HTML_TEXT))} " +
           "subject=${summarizeIntentValue(intent.getStringExtra(Intent.EXTRA_SUBJECT))} " +
           "stream=${summarizeIntentValue(extraStream?.toString())} " +
           "clipCount=${clipData?.itemCount ?: 0} " +
           "clipText=${summarizeIntentValue(firstClipItem?.text?.toString())} " +
+          "clipHtml=${summarizeIntentValue(firstClipItem?.htmlText)} " +
           "clipUri=${summarizeIntentValue(firstClipItem?.uri?.toString())} " +
+          "extras=${summarizeIntentValue(extrasKeys)} " +
           "consumed=${intent.getBooleanExtra(LOCATION_IMPORT_CONSUMED_EXTRA, false)}"
       )
     }
@@ -1301,6 +1307,15 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
   }
 
   @ReactMethod
+  fun resolveLocationImportUrl(url: String, promise: Promise) {
+    try {
+      promise.resolve(resolveLocationImportUrlInternal(url))
+    } catch (t: Throwable) {
+      promise.reject("ERR_LOCATION_IMPORT_URL", t.message, t)
+    }
+  }
+
+  @ReactMethod
   fun requestLocationPermission(promise: Promise) {
     val ok = permissionGranted(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
     if (ok) {
@@ -1375,18 +1390,27 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
 
     val clipData = intent.clipData
     val firstClipItem = clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+    val extraTexts = intent.getStringArrayListExtra(Intent.EXTRA_TEXT)
+    val extraHtmlText = intent.getStringExtra(Intent.EXTRA_HTML_TEXT)
     @Suppress("DEPRECATION")
     val extraStream = intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
     val rawText = when (intent.action) {
       Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+        ?: extraHtmlText
+        ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
+      Intent.ACTION_SEND_MULTIPLE -> extraTexts?.firstOrNull()
+        ?: extraHtmlText
         ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
       Intent.ACTION_VIEW -> intent.dataString
         ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+        ?: extraHtmlText
         ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
       else -> intent.getStringExtra(Intent.EXTRA_TEXT)
+        ?: extraHtmlText
         ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
     }
       ?: firstClipItem?.text?.toString()
+      ?: firstClipItem?.htmlText
       ?: firstClipItem?.uri?.toString()
       ?: extraStream?.toString()
 
@@ -1403,6 +1427,59 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
       putString("rawText", rawText)
       putString("source", intent.action ?: "unknown")
     }
+  }
+
+  private fun resolveLocationImportUrlInternal(url: String): String {
+    var currentUrl = url.trim()
+    if (!currentUrl.startsWith("http://") && !currentUrl.startsWith("https://")) {
+      return currentUrl
+    }
+
+    repeat(6) { attempt ->
+      val connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+        instanceFollowRedirects = false
+        requestMethod = "GET"
+        connectTimeout = 5000
+        readTimeout = 5000
+        setRequestProperty(
+          "User-Agent",
+          "Mozilla/5.0 (Linux; Android 15; PJT110) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Mobile Safari/537.36"
+        )
+      }
+
+      try {
+        val responseCode = connection.responseCode
+        val location = connection.getHeaderField("Location")
+        if (responseCode in 300..399 && !location.isNullOrBlank()) {
+          val redirectedUrl = URL(URL(currentUrl), location).toString()
+          Log.d(
+            LOCATION_IMPORT_LOG_TAG,
+            "resolveLocationImportUrl redirect[$attempt] from=${summarizeIntentValue(currentUrl)} to=${summarizeIntentValue(redirectedUrl)}"
+          )
+          currentUrl = redirectedUrl
+          return@repeat
+        }
+
+        val finalUrl = connection.url?.toString()?.trim().orEmpty().ifBlank { currentUrl }
+        Log.d(
+          LOCATION_IMPORT_LOG_TAG,
+          "resolveLocationImportUrl final[$attempt] ${summarizeIntentValue(finalUrl)}"
+        )
+        return finalUrl
+      } finally {
+        try {
+          connection.inputStream?.close()
+        } catch (_: Throwable) {
+        }
+        try {
+          connection.errorStream?.close()
+        } catch (_: Throwable) {
+        }
+        connection.disconnect()
+      }
+    }
+
+    return currentUrl
   }
 
   // Camera methods ------------------------------------------
