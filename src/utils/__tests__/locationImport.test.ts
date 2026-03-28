@@ -1,4 +1,5 @@
 import {
+  extractAmapShortUrlCandidate,
   extractCoordinatesFromText,
   isAmapPlaceholderLocationText,
   isLikelyAmapShortUrl,
@@ -102,6 +103,11 @@ describe('locationImport', () => {
       input: '100% ready: 39.9042,116.4074',
       expected: beijing,
     },
+    {
+      name: 'plain coordinates that use full-width punctuation',
+      input: '39.9042，116.4074',
+      expected: beijing,
+    },
   ])('parses $name', ({ input, expected }) => {
     expect(extractCoordinatesFromText(input)).toEqual(expected);
   });
@@ -136,6 +142,59 @@ describe('locationImport', () => {
     expect(extractCoordinatesFromText(resolved)).toEqual(beijing);
   });
 
+  it('resolves embedded AMap short links inside shared text', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      url: 'https://uri.amap.com/marker?position=116.4074,39.9042&name=test',
+      text: jest.fn().mockResolvedValue(''),
+    });
+
+    const resolved = await resolveLocationImportText(
+      '我分享给你一个位置 https://surl.amap.com/65Y1zn8142hh，记得导入',
+      fetchMock as any
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith('https://surl.amap.com/65Y1zn8142hh', {
+      method: 'GET',
+      redirect: 'follow',
+    });
+    expect(resolved).toContain('https://uri.amap.com/marker?position=116.4074,39.9042&name=test');
+    expect(extractCoordinatesFromText(resolved)).toEqual(beijing);
+  });
+
+  it('prefers response-body coordinates after a redirect when the final URL still has no coordinates', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      url: 'https://map.qq.com/render/share?id=abc',
+      text: jest.fn().mockResolvedValue('coord:31.2304,121.4737'),
+    });
+
+    const resolved = await resolveLocationImportText(
+      'https://map.qq.com/some-share',
+      fetchMock as any
+    );
+
+    expect(resolved).toBe('coord:31.2304,121.4737');
+    expect(extractCoordinatesFromText(resolved)).toEqual(shanghai);
+  });
+
+  it('resolves known map URLs when the first response body contains coordinates', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      url: 'https://map.qq.com/some-share',
+      text: jest.fn().mockResolvedValue('coord:31.2304,121.4737'),
+    });
+
+    const resolved = await resolveLocationImportText(
+      'https://map.qq.com/some-share',
+      fetchMock as any
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith('https://map.qq.com/some-share', {
+      method: 'GET',
+      redirect: 'follow',
+    });
+    expect(resolved).toBe('coord:31.2304,121.4737');
+    expect(extractCoordinatesFromText(resolved)).toEqual(shanghai);
+  });
+
   it('keeps the original shared text when short-link expansion fails', async () => {
     const originalText = 'https://surl.amap.com/65Y1zn8142hh';
     const fetchMock = jest.fn().mockRejectedValue(new Error('network down'));
@@ -154,6 +213,13 @@ describe('locationImport', () => {
   it('detects AMap short links', () => {
     expect(isLikelyAmapShortUrl('https://surl.amap.com/65Y1zn8142hh')).toBe(true);
     expect(isLikelyAmapShortUrl('https://uri.amap.com/marker?position=116.4074,39.9042')).toBe(false);
+  });
+
+  it('extracts embedded AMap short links from shared text', () => {
+    expect(
+      extractAmapShortUrlCandidate('我分享给你一个位置 https://surl.amap.com/65Y1zn8142hh，记得导入')
+    ).toBe('https://surl.amap.com/65Y1zn8142hh');
+    expect(extractAmapShortUrlCandidate('https://uri.amap.com/marker?position=116.4074,39.9042')).toBeNull();
   });
 
   it('detects AMap placeholder share text', () => {

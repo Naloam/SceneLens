@@ -11,6 +11,7 @@ const NativeModules = {
     getCurrentLocation: jest.fn(() => Promise.resolve({ latitude: 0, longitude: 0, accuracy: 100, timestamp: Date.now() })),
     getConnectedWiFi: jest.fn(() => Promise.resolve(null)),
     consumePendingLocationImport: jest.fn(() => Promise.resolve(null)),
+    shareFile: jest.fn(() => Promise.resolve(true)),
     configureBackgroundLocationRecovery: jest.fn(() => Promise.resolve(true)),
     startBackgroundLocationService: jest.fn((intervalMs = 0) => Promise.resolve({
       running: true,

@@ -34,6 +34,7 @@ import { geoFenceManager } from '../stores';
 import sceneBridge from '../core/SceneBridge';
 import { silentContextEngine } from '../core/SilentContextEngine';
 import {
+  extractAmapShortUrlCandidate,
   extractCoordinatesFromText,
   isAmapPlaceholderLocationText,
   isLikelyAmapShortUrl,
@@ -427,9 +428,18 @@ export const LocationConfigScreen: React.FC = () => {
     }
 
     let resolvedText = normalizedText;
-    if (isLikelyAmapShortUrl(normalizedText)) {
+    const amapShortUrl = isLikelyAmapShortUrl(normalizedText)
+      ? normalizedText
+      : extractAmapShortUrlCandidate(normalizedText);
+
+    if (amapShortUrl) {
       try {
-        resolvedText = await sceneBridge.resolveLocationImportUrl(normalizedText);
+        const resolvedNativeUrl = await sceneBridge.resolveLocationImportUrl(amapShortUrl);
+        if (resolvedNativeUrl && resolvedNativeUrl !== amapShortUrl) {
+          resolvedText = normalizedText.includes(amapShortUrl)
+            ? normalizedText.replace(amapShortUrl, resolvedNativeUrl)
+            : resolvedNativeUrl;
+        }
       } catch (error) {
         console.warn('原生高德短链展开失败，回退到 JS 解析:', error);
       }

@@ -8,6 +8,7 @@ import android.app.AppOpsManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.ContentUris
+import android.content.ClipData
 import android.content.Intent
 import android.content.IntentFilter
 import android.app.PendingIntent
@@ -1312,6 +1313,64 @@ class SceneBridgeModule(private val ctx: ReactApplicationContext) : ReactContext
       promise.resolve(resolveLocationImportUrlInternal(url))
     } catch (t: Throwable) {
       promise.reject("ERR_LOCATION_IMPORT_URL", t.message, t)
+    }
+  }
+
+  @ReactMethod
+  fun shareFile(
+    fileUri: String,
+    mimeType: String?,
+    chooserTitle: String?,
+    subject: String?,
+    text: String?,
+    promise: Promise
+  ) {
+    try {
+      val uri = Uri.parse(fileUri)
+      if (uri.scheme.isNullOrBlank()) {
+        promise.reject("ERR_SHARE_FILE_URI", "分享文件 URI 无效: $fileUri")
+        return
+      }
+
+      val resolvedMimeType =
+        when {
+          mimeType.isNullOrBlank() -> "*/*"
+          mimeType.equals("application/json", ignoreCase = true) -> "*/*"
+          else -> mimeType
+        }
+
+      val sendIntent = Intent(Intent.ACTION_SEND).apply {
+        type = resolvedMimeType
+        putExtra(Intent.EXTRA_STREAM, uri)
+        clipData = ClipData.newUri(ctx.contentResolver, subject ?: "SceneLens export", uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (!subject.isNullOrBlank()) {
+          putExtra(Intent.EXTRA_SUBJECT, subject)
+        }
+        if (!text.isNullOrBlank()) {
+          putExtra(Intent.EXTRA_TEXT, text)
+        }
+      }
+
+      ctx.packageManager.queryIntentActivities(sendIntent, PackageManager.MATCH_DEFAULT_ONLY).forEach { resolveInfo ->
+        val packageName = resolveInfo.activityInfo?.packageName ?: return@forEach
+        ctx.grantUriPermission(packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+
+      val chooser = Intent.createChooser(sendIntent, chooserTitle ?: "分享导出文件").apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+
+      val activity = getCurrentActivity()
+      if (activity != null) {
+        activity.startActivity(chooser)
+      } else {
+        ctx.startActivity(chooser)
+      }
+      promise.resolve(true)
+    } catch (t: Throwable) {
+      promise.reject("ERR_SHARE_FILE", t.message, t)
     }
   }
 

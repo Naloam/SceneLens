@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system';
 import { Platform, Share } from 'react-native';
+import sceneBridge from '../core/SceneBridge';
 
 export const APP_VERSION = '1.0.0';
 export const APP_PACKAGE_NAME = 'com.che1sy.scenelens';
@@ -7,6 +8,7 @@ export const SCENELENS_REPO_URL = 'https://github.com/Naloam/SceneLens';
 export const SCENELENS_ISSUES_URL = `${SCENELENS_REPO_URL}/issues/new`;
 
 export type ExportShareState = 'share_sheet_opened' | 'saved_only';
+export type ExportShareMode = 'file_attachment' | 'text_fallback' | 'not_shared';
 
 export interface ExportedDataFile {
   fileName: string;
@@ -16,6 +18,13 @@ export interface ExportedDataFile {
 
 export interface ExportDataResult extends ExportedDataFile {
   shareState: ExportShareState;
+  shareMode: ExportShareMode;
+}
+
+export interface SharedDirectoryExportedDataFile {
+  fileName: string;
+  fileUri: string;
+  directoryUri: string;
 }
 
 export const PRIVACY_POLICY_TEXT = [
@@ -41,12 +50,16 @@ function formatExportTimestamp(now: Date): string {
   return `${year}${month}${day}-${hours}${minutes}${seconds}`;
 }
 
+function buildExportFileName(now: Date): string {
+  return `scenelens-export-${formatExportTimestamp(now)}.json`;
+}
+
 export async function persistExportData(data: string, now: Date = new Date()): Promise<ExportedDataFile> {
   if (!FileSystem.documentDirectory) {
     throw new Error('当前环境未提供应用文档目录，无法生成导出文件');
   }
 
-  const fileName = `scenelens-export-${formatExportTimestamp(now)}.json`;
+  const fileName = buildExportFileName(now);
   const fileUri = `${FileSystem.documentDirectory}${fileName}`;
 
   await FileSystem.writeAsStringAsync(fileUri, data, {
@@ -69,33 +82,95 @@ export async function persistExportData(data: string, now: Date = new Date()): P
   };
 }
 
+export async function persistExportDataToAndroidDirectory(
+  data: string,
+  now: Date = new Date()
+): Promise<SharedDirectoryExportedDataFile | null> {
+  if (Platform.OS !== 'android') {
+    throw new Error('导出到系统文件夹目前仅支持 Android');
+  }
+
+  const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+
+  if (!permission.granted) {
+    return null;
+  }
+
+  const fileName = buildExportFileName(now);
+  const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+    permission.directoryUri,
+    fileName,
+    'application/json'
+  );
+
+  await FileSystem.StorageAccessFramework.writeAsStringAsync(fileUri, data, {
+    encoding: FileSystem.EncodingType.UTF8,
+  });
+
+  return {
+    fileName,
+    fileUri,
+    directoryUri: permission.directoryUri,
+  };
+}
+
 export async function exportDataWithBestEffortShare(
   data: string,
   now: Date = new Date()
 ): Promise<ExportDataResult> {
   const exportedFile = await persistExportData(data, now);
   let shareState: ExportShareState = 'saved_only';
+  let shareMode: ExportShareMode = 'not_shared';
 
   try {
-    await Share.share(
-      {
-        title: exportedFile.fileName,
-        url: exportedFile.shareUri,
-        message: `SceneLens 导出文件已生成：${exportedFile.shareUri}`,
-      },
-      {
-        dialogTitle: '分享导出文件',
-        subject: exportedFile.fileName,
+    if (Platform.OS === 'android') {
+      const opened = await sceneBridge.shareFile(
+        exportedFile.shareUri,
+        'application/json',
+        '分享导出文件',
+        exportedFile.fileName,
+        'SceneLens 导出数据'
+      );
+
+      if (!opened) {
+        await Share.share(
+          {
+            title: exportedFile.fileName,
+            message: `SceneLens 导出文件已生成：${exportedFile.shareUri}`,
+          },
+          {
+            dialogTitle: '分享导出文件',
+            subject: exportedFile.fileName,
+          }
+        );
+        shareMode = 'text_fallback';
+      } else {
+        shareMode = 'file_attachment';
       }
-    );
+    } else {
+      await Share.share(
+        {
+          title: exportedFile.fileName,
+          url: exportedFile.shareUri,
+          message: `SceneLens 导出文件已生成：${exportedFile.shareUri}`,
+        },
+        {
+          dialogTitle: '分享导出文件',
+          subject: exportedFile.fileName,
+        }
+      );
+      shareMode = 'file_attachment';
+    }
     shareState = 'share_sheet_opened';
   } catch {
     shareState = 'saved_only';
+    shareMode = 'not_shared';
   }
 
   return {
     ...exportedFile,
     shareState,
+    shareMode,
   };
 }
 

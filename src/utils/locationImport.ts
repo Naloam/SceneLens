@@ -4,17 +4,25 @@ export interface ImportedCoordinates {
 }
 
 const AMAP_SHORT_URL_PATTERN = /^https?:\/\/surl\.amap\.com\/[A-Za-z0-9]+/i;
-const AMAP_PLACEHOLDER_PATTERN = /(?:surl\.amap\.com|m\.amap\.com\/callAPP|androidamap\?action=shorturl|viewMap\?sourceApplication=from_wb)/i;
-const AMAP_Q_COORDINATES_PATTERN = /(?:^|[?&])q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,|(?:%2C)|$)/i;
-const AMAP_Q_SOURCE_PATTERN = /(?:^https?:\/\/(?:m|www)\.amap\.com\/\?q=|(?:^|[?&])android=androidamap|androidamap\?action=shorturl|(?:^|[?&])mo=https?:\/\/m\.amap\.com\/\?q=)/i;
-const ZERO_COORDINATE_PATTERN = /(?:^|[?&])(?:q|position|location)=0(?:\.0+)?,0(?:\.0+)?(?:,|$)|(?:^|[?&])lat(?:itude)?=0(?:\.0+)?[&;](?:lng|lon|longitude)=0(?:\.0+)?|(?:^|[?&])(?:lng|lon|longitude)=0(?:\.0+)?[&;]lat(?:itude)?=0(?:\.0+)?/i;
+const AMAP_PLACEHOLDER_PATTERN =
+  /(?:surl\.amap\.com|m\.amap\.com\/callAPP|androidamap\?action=shorturl|viewMap\?sourceApplication=from_wb)/i;
+const AMAP_Q_COORDINATES_PATTERN =
+  /(?:^|[?&])q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,|(?:%2C)|$)/i;
+const AMAP_Q_SOURCE_PATTERN =
+  /(?:^https?:\/\/(?:m|www)\.amap\.com\/\?q=|(?:^|[?&])android=androidamap|androidamap\?action=shorturl|(?:^|[?&])mo=https?:\/\/m\.amap\.com\/\?q=)/i;
+const ZERO_COORDINATE_PATTERN =
+  /(?:^|[?&])(?:q|position|location)=0(?:\.0+)?,0(?:\.0+)?(?:,|$)|(?:^|[?&])lat(?:itude)?=0(?:\.0+)?[&;](?:lng|lon|longitude)=0(?:\.0+)?|(?:^|[?&])(?:lng|lon|longitude)=0(?:\.0+)?[&;]lat(?:itude)?=0(?:\.0+)?/i;
+const HTTP_URL_CANDIDATE_PATTERN = /https?:\/\/[^\s<>"'，。！？；、）】]+/gi;
+const TRAILING_URL_PUNCTUATION_PATTERN = /[),.;!?，。！？；、】）>]+$/;
+const RESOLVABLE_MAP_URL_PATTERN =
+  /^https?:\/\/(?:surl\.amap\.com|uri\.amap\.com|(?:m|www)\.amap\.com|(?:api\.)?map\.baidu\.com|j\.map\.baidu\.com|apis\.map\.qq\.com|map\.qq\.com|maps\.app\.goo\.gl|maps\.apple\.com|www\.google\.com\/maps)\b/i;
 
 export function isLikelyAmapShortUrl(text: string): boolean {
   return AMAP_SHORT_URL_PATTERN.test(text.trim());
 }
 
 export function isAmapPlaceholderLocationText(text: string): boolean {
-  const normalized = safelyDecodeText(text).replace(/\+/g, ' ');
+  const normalized = normalizeImportText(text);
   return AMAP_PLACEHOLDER_PATTERN.test(normalized) && ZERO_COORDINATE_PATTERN.test(normalized);
 }
 
@@ -62,25 +70,67 @@ function safelyDecodeText(text: string): string {
   }
 }
 
-export async function resolveLocationImportText(
-  text: string,
-  fetchImpl: typeof fetch = fetch
-): Promise<string> {
-  const normalized = text.trim();
-  if (!normalized || !AMAP_SHORT_URL_PATTERN.test(normalized) || extractCoordinatesFromText(normalized)) {
-    return normalized;
+function normalizeImportText(text: string): string {
+  return safelyDecodeText(text)
+    .replace(/\+/g, ' ')
+    .replace(/[，﹐、]/g, ',')
+    .replace(/[；]/g, ';')
+    .replace(/[：]/g, ':')
+    .replace(/[（]/g, '(')
+    .replace(/[）]/g, ')');
+}
+
+function trimUrlCandidate(text: string): string {
+  return text.replace(TRAILING_URL_PUNCTUATION_PATTERN, '').trim();
+}
+
+function extractHttpUrlCandidates(text: string): string[] {
+  const candidates = new Set<string>();
+
+  for (const sourceText of [text, safelyDecodeText(text)]) {
+    for (const match of sourceText.match(HTTP_URL_CANDIDATE_PATTERN) ?? []) {
+      const candidate = trimUrlCandidate(match);
+      if (candidate) {
+        candidates.add(candidate);
+      }
+    }
   }
 
+  return [...candidates];
+}
+
+function findAmapShortUrlCandidate(text: string): string | null {
+  return extractHttpUrlCandidates(text).find((candidate) => AMAP_SHORT_URL_PATTERN.test(candidate)) ?? null;
+}
+
+export function extractAmapShortUrlCandidate(text: string): string | null {
+  return findAmapShortUrlCandidate(text);
+}
+
+function findResolvableMapUrlCandidate(text: string): string | null {
+  return (
+    extractHttpUrlCandidates(text).find(
+      (candidate) =>
+        RESOLVABLE_MAP_URL_PATTERN.test(candidate) && !extractCoordinatesFromText(candidate)
+    ) ?? null
+  );
+}
+
+async function resolveUrlCandidate(
+  url: string,
+  fetchImpl: typeof fetch
+): Promise<string> {
   try {
-    const response = await fetchImpl(normalized, {
+    let redirectedUrl: string | null = null;
+    const response = await fetchImpl(url, {
       method: 'GET',
       redirect: 'follow',
     });
 
     if (response.url) {
-      const resolvedUrl = response.url.trim();
-      if (resolvedUrl && resolvedUrl !== normalized) {
-        return resolvedUrl;
+      redirectedUrl = trimUrlCandidate(response.url.trim());
+      if (redirectedUrl === url) {
+        redirectedUrl = null;
       }
     }
 
@@ -88,15 +138,53 @@ export async function resolveLocationImportText(
     if (responseText?.trim() && extractCoordinatesFromText(responseText)) {
       return responseText.trim();
     }
+
+    if (redirectedUrl) {
+      return redirectedUrl;
+    }
   } catch {
-    // Keep the original shared text when short-link expansion fails.
+    // Keep the original shared text when provider-side expansion fails.
+  }
+
+  return url;
+}
+
+export async function resolveLocationImportText(
+  text: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<string> {
+  const normalized = text.trim();
+  if (!normalized || extractCoordinatesFromText(normalized)) {
+    return normalized;
+  }
+
+  const amapShortUrl = findAmapShortUrlCandidate(normalized);
+  if (amapShortUrl) {
+    const resolvedShortUrl = await resolveUrlCandidate(amapShortUrl, fetchImpl);
+    if (resolvedShortUrl !== amapShortUrl) {
+      return normalized.includes(amapShortUrl)
+        ? normalized.replace(amapShortUrl, resolvedShortUrl)
+        : resolvedShortUrl;
+    }
+  }
+
+  const mapUrlCandidate = findResolvableMapUrlCandidate(normalized);
+  if (!mapUrlCandidate) {
+    return normalized;
+  }
+
+  const resolvedMapUrl = await resolveUrlCandidate(mapUrlCandidate, fetchImpl);
+  if (resolvedMapUrl !== mapUrlCandidate) {
+    return normalized.includes(mapUrlCandidate)
+      ? normalized.replace(mapUrlCandidate, resolvedMapUrl)
+      : resolvedMapUrl;
   }
 
   return normalized;
 }
 
 export function extractCoordinatesFromText(text: string): ImportedCoordinates | null {
-  const normalized = safelyDecodeText(text).replace(/\+/g, ' ');
+  const normalized = normalizeImportText(text);
 
   const amapQMatch = normalized.match(AMAP_Q_COORDINATES_PATTERN);
   if (amapQMatch && AMAP_Q_SOURCE_PATTERN.test(normalized)) {
@@ -136,11 +224,13 @@ export function extractCoordinatesFromText(text: string): ImportedCoordinates | 
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
     },
     {
-      pattern: /(?:^|[?&])lat(?:itude)?=(-?\d+(?:\.\d+)?)[&;](?:lng|lon|longitude)=(-?\d+(?:\.\d+)?)/i,
+      pattern:
+        /(?:^|[?&])lat(?:itude)?=(-?\d+(?:\.\d+)?)[&;](?:lng|lon|longitude)=(-?\d+(?:\.\d+)?)/i,
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
     },
     {
-      pattern: /(?:^|[?&])(?:lng|lon|longitude)=(-?\d+(?:\.\d+)?)[&;]lat(?:itude)?=(-?\d+(?:\.\d+)?)/i,
+      pattern:
+        /(?:^|[?&])(?:lng|lon|longitude)=(-?\d+(?:\.\d+)?)[&;]lat(?:itude)?=(-?\d+(?:\.\d+)?)/i,
       map: (match) => buildCoordinates(Number.parseFloat(match[2]), Number.parseFloat(match[1])),
     },
     {
@@ -148,19 +238,21 @@ export function extractCoordinatesFromText(text: string): ImportedCoordinates | 
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
     },
     {
-      pattern: /纬度[：:\s]+(-?\d+(?:\.\d+)?)\s*[，, ]+\s*经度[：:\s]+(-?\d+(?:\.\d+)?)/i,
+      pattern: /纬度[:\s]+(-?\d+(?:\.\d+)?)\s*[, ]+\s*经度[:\s]+(-?\d+(?:\.\d+)?)/i,
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
     },
     {
-      pattern: /经度[：:\s]+(-?\d+(?:\.\d+)?)\s*[，, ]+\s*纬度[：:\s]+(-?\d+(?:\.\d+)?)/i,
+      pattern: /经度[:\s]+(-?\d+(?:\.\d+)?)\s*[, ]+\s*纬度[:\s]+(-?\d+(?:\.\d+)?)/i,
       map: (match) => buildCoordinates(Number.parseFloat(match[2]), Number.parseFloat(match[1])),
     },
     {
-      pattern: /lat(?:itude)?[：:\s=]+(-?\d+(?:\.\d+)?)\s*[，, ]+\s*(?:lng|lon|longitude)[：:\s=]+(-?\d+(?:\.\d+)?)/i,
+      pattern:
+        /latitude[:\s=]+(-?\d+(?:\.\d+)?)\s*[, ]+\s*(?:lng|lon|longitude)[:\s=]+(-?\d+(?:\.\d+)?)/i,
       map: (match) => buildCoordinates(Number.parseFloat(match[1]), Number.parseFloat(match[2])),
     },
     {
-      pattern: /(?:lng|lon|longitude)[：:\s=]+(-?\d+(?:\.\d+)?)\s*[，, ]+\s*lat(?:itude)?[：:\s=]+(-?\d+(?:\.\d+)?)/i,
+      pattern:
+        /(?:lng|lon|longitude)[:\s=]+(-?\d+(?:\.\d+)?)\s*[, ]+\s*latitude[:\s=]+(-?\d+(?:\.\d+)?)/i,
       map: (match) => buildCoordinates(Number.parseFloat(match[2]), Number.parseFloat(match[1])),
     },
   ];

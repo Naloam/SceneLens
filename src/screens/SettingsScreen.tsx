@@ -11,6 +11,7 @@ import {
   ScrollView,
   Alert,
   Linking,
+  Platform,
   TouchableOpacity,
   Text,
 } from 'react-native';
@@ -51,6 +52,7 @@ import {
   SCENELENS_REPO_URL,
   buildFeedbackIssueUrl,
   exportDataWithBestEffortShare,
+  persistExportDataToAndroidDirectory,
 } from '../utils/settingsSupport';
 
 /**
@@ -654,13 +656,37 @@ export const SettingsScreen: React.FC = () => {
       const result = await exportDataWithBestEffortShare(data);
 
       const message =
-        result.shareState === 'share_sheet_opened'
-          ? `JSON 文件已导出到应用文档目录，并已拉起系统分享面板。\n\n文件名：${result.fileName}\n路径：${result.fileUri}\n\n是否真正发送成功，取决于您在分享面板中的后续操作。`
-          : `JSON 文件已导出到应用文档目录，但当前未能拉起可用的分享面板。\n\n文件名：${result.fileName}\n路径：${result.fileUri}\n\n请稍后从系统文件管理器中继续分享该文件。`;
+        result.shareState === 'share_sheet_opened' && result.shareMode === 'file_attachment'
+          ? `JSON 文件已保存到 SceneLens 应用私有目录，并已按文件附件方式拉起系统分享面板。\n\n文件名：${result.fileName}\n应用内路径：${result.fileUri}\n分享地址：${result.shareUri}\n\n现在可以在分享面板里直接选择 QQ、微信、邮件等应用发送该 JSON 文件。\n\n其中 content://...FileProvider/... 是系统分享用的访问地址，说明文件已经生成；是否真正发送成功，取决于您在分享面板中的后续操作。\n\n如果想直接在系统文件管理器里看到文件，请使用“导出到系统文件夹”。`
+          : result.shareState === 'share_sheet_opened' && result.shareMode === 'text_fallback'
+            ? `当前已拉起系统分享面板，但这次仍是文本分享，不是 JSON 文件附件。\n\n文件名：${result.fileName}\n应用内路径：${result.fileUri}\n分享地址：${result.shareUri}\n\n这通常说明手机上运行的还是旧安装包，尚未包含新的原生文件分享能力。重新安装最新 Android 包后，“导出并分享”才会把 JSON 作为附件发给 QQ、微信等应用。\n\n如果你现在就需要拿到文件，请先使用“导出到系统文件夹”。`
+          : `JSON 文件已保存到 SceneLens 应用私有目录，但当前未能拉起可用的分享面板。\n\n文件名：${result.fileName}\n应用内路径：${result.fileUri}\n\n这个目录通常不会直接出现在系统文件管理器中；如果想直观看到并长期留存该文件，请使用“导出到系统文件夹”。`;
 
       Alert.alert('导出数据', message, [{ text: '确定', onPress: () => {} }]);
     } catch (error) {
       Alert.alert('导出失败', `无法导出数据：${(error as Error).message}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportDataToSystemDirectory = async () => {
+    setIsExporting(true);
+    try {
+      const data = await exportData();
+      const result = await persistExportDataToAndroidDirectory(data);
+
+      if (!result) {
+        Alert.alert('已取消', '未选择导出目录，数据导出已取消。');
+        return;
+      }
+
+      Alert.alert(
+        '导出到系统文件夹',
+        `JSON 文件已保存到你刚刚选择的系统文件夹。\n\n文件名：${result.fileName}\n文件地址：${result.fileUri}\n\n现在可以直接在系统“文件”或“下载”中查看、分享和备份。`
+      );
+    } catch (error) {
+      Alert.alert('导出失败', `无法导出到系统文件夹：${(error as Error).message}`);
     } finally {
       setIsExporting(false);
     }
@@ -1233,14 +1259,28 @@ export const SettingsScreen: React.FC = () => {
         <List.Subheader style={styles.cardHeader}>数据设置</List.Subheader>
 
         <List.Item
-          title="导出数据"
-          description="导出到应用文档目录，并尝试拉起系统分享"
+          title="导出并分享"
+          description="生成 JSON 文件附件，并拉起系统分享面板"
           left={(props) => <List.Icon {...props} icon="download" />}
           onPress={handleExportData}
           disabled={isExporting}
         />
 
         <Divider />
+
+        {Platform.OS === 'android' && (
+          <>
+            <List.Item
+              title="导出到系统文件夹"
+              description="选择下载或文档目录，便于在文件管理器查看"
+              left={(props) => <List.Icon {...props} icon="folder-download" />}
+              onPress={handleExportDataToSystemDirectory}
+              disabled={isExporting}
+            />
+
+            <Divider />
+          </>
+        )}
 
         <List.Item
           title="清除历史"

@@ -68,6 +68,13 @@ interface SceneBridgeNativeModule {
   getConnectedWiFi(): Promise<WiFiInfo | null>;
   consumePendingLocationImport(): Promise<PendingLocationImport | null>;
   resolveLocationImportUrl(url: string): Promise<string>;
+  shareFile(
+    fileUri: string,
+    mimeType: string,
+    chooserTitle?: string,
+    subject?: string,
+    text?: string
+  ): Promise<boolean>;
   configureBackgroundLocationRecovery(enabled: boolean, intervalMs: number): Promise<boolean>;
   startBackgroundLocationService(intervalMs: number): Promise<BackgroundLocationServiceStatus>;
   stopBackgroundLocationService(): Promise<boolean>;
@@ -172,6 +179,7 @@ const fallback: SceneBridgeNativeModule = {
   async getConnectedWiFi() { return null; },
   async consumePendingLocationImport() { return null; },
   async resolveLocationImportUrl(url: string) { return url; },
+  async shareFile() { return false; },
   async configureBackgroundLocationRecovery() { return false; },
   async startBackgroundLocationService(intervalMs: number) {
     return {

@@ -21,3 +21,17 @@ export const downloadAsync = jest.fn(async (from: string, to: string) => ({
 export const writeAsStringAsync = jest.fn(async () => {});
 
 export const getContentUriAsync = jest.fn(async (uri: string) => `content://${uri.replace('file:///', '')}`);
+
+export const StorageAccessFramework = {
+  getUriForDirectoryInRoot: jest.fn((folderName: string) => `content://mock-tree/${folderName}`),
+  requestDirectoryPermissionsAsync: jest.fn(
+    async (initialFileUrl?: string | null) => ({
+      granted: true as const,
+      directoryUri: initialFileUrl ?? 'content://mock-tree/Download',
+    })
+  ),
+  createFileAsync: jest.fn(
+    async (parentUri: string, fileName: string, _mimeType: string) => `${parentUri}/${fileName}`
+  ),
+  writeAsStringAsync,
+};
