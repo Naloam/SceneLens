@@ -54,5 +54,14 @@ docs/
 # Windows special files
 **/nul
 
+# Android crash / profiling artifacts (JVM fatal-error logs, JFR replay logs)
+android/hs_err_pid*.log
+android/replay_pid*.log
+
+# local debugging dumps (adb UI dumps, scratch jest output, temp notes)
+/window_dump*.xml
+/tmp_jest_results.json
+/TempLog.md
+
 # other
 *.png
